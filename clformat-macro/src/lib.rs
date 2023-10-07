@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use parse::{parse_format_string, Directive};
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
@@ -40,7 +42,7 @@ impl Parse for FormatInput {
 
 impl ToTokens for FormatInput {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let mut expressions = self.expressions.iter();
+        let expressions = self.expressions.iter();
 
         quote! {
             use std::fmt::Write;
@@ -48,7 +50,22 @@ impl ToTokens for FormatInput {
         }
         .to_tokens(tokens);
 
-        for directive in &self.formatstr {
+        self.write_expressions(expressions, &self.formatstr, tokens);
+
+        quote! { result }.to_tokens(tokens);
+    }
+}
+
+impl FormatInput {
+    fn write_expressions<'a, T>(
+        &self,
+        mut expressions: T,
+        directives: &[Directive],
+        tokens: &mut proc_macro2::TokenStream,
+    ) where
+        T: Iterator<Item = &'a Expr>,
+    {
+        for directive in directives {
             match directive {
                 Directive::TildeA => {
                     let expression = expressions.next().unwrap();
@@ -68,11 +85,44 @@ impl ToTokens for FormatInput {
                 Directive::Literal(literal) => {
                     quote! { write!(result, #literal).unwrap(); }.to_tokens(tokens)
                 }
-                Directive::Iteration(_) => todo!(),
+                Directive::Iteration(directives) => {
+                    let expression = expressions.next().unwrap();
+                    let iter = syn::parse_str::<Expr>("zork.next().unwrap()")
+                        .expect("static string should be valid syntax");
+                    let nested = IndexedExpression {
+                        count: 0,
+                        expr: &iter,
+                    };
+                    let mut block = proc_macro2::TokenStream::new();
+                    self.write_expressions(nested, directives, &mut block);
+
+                    quote! {
+                        let mut zork = #expression.into_iter().peekable();
+                        loop {
+                            if zork.peek().is_none() {
+                                break;
+                            }
+                            { #block }
+                        }
+                    }
+                    .to_tokens(tokens);
+                }
             }
         }
+    }
+}
 
-        quote! { result }.to_tokens(tokens);
+struct IndexedExpression<'a> {
+    count: usize,
+    expr: &'a Expr,
+}
+
+impl<'a> Iterator for IndexedExpression<'a> {
+    type Item = &'a Expr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.count += 1;
+        Some(self.expr)
     }
 }
 
