@@ -79,11 +79,14 @@ impl FormatInput {
                     let expression = expressions.next().unwrap();
                     quote! { write!(result, "{}", #expression).unwrap(); }.to_tokens(tokens)
                 }
-                Directive::TildePercent => {
-                    quote! { write!(result, "\n").unwrap(); }.to_tokens(tokens)
-                }
+                Directive::Newline => quote! { write!(result, "\n").unwrap(); }.to_tokens(tokens),
                 Directive::Literal(literal) => {
                     quote! { write!(result, #literal).unwrap(); }.to_tokens(tokens)
+                }
+                Directive::Skip => {
+                    let expression = expressions.next().unwrap();
+                    // Note we have to output the expression since loop expressions involve side effects.
+                    quote! {  let _ = #expression; }.to_tokens(tokens)
                 }
                 Directive::Iteration(directives) => {
                     let expression = expressions.next().unwrap();
@@ -103,6 +106,14 @@ impl FormatInput {
                                 break;
                             }
                             { #block }
+                        }
+                    }
+                    .to_tokens(tokens);
+                }
+                Directive::Break => {
+                    quote! {
+                        if zork.peek().is_none() {
+                            break;
                         }
                     }
                     .to_tokens(tokens);

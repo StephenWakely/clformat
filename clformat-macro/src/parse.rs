@@ -7,9 +7,23 @@ pub enum Directive {
     TildeA,
     TildeS,
     TildeD,
-    TildePercent,
+    Break,
+    Newline,
+    Skip,
     Iteration(Vec<Directive>),
     Literal(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum State {
+    Normal,
+    Loop,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::Normal
+    }
 }
 
 pub fn parse_format_string(
@@ -17,12 +31,13 @@ pub fn parse_format_string(
     format_string: &str,
 ) -> Result<Vec<Directive>, syn::Error> {
     let mut chars = format_string.chars().peekable();
-    parse_string(&mut chars, token)
+    parse_string(&mut chars, token, State::default())
 }
 
 fn parse_string(
     chars: &mut Peekable<std::str::Chars>,
     token: LitStr,
+    state: State,
 ) -> Result<Vec<Directive>, syn::Error> {
     let mut directives = Vec::new();
     let mut literal = String::new();
@@ -47,17 +62,31 @@ fn parse_string(
                     chars.next();
                 }
                 Some('%') => {
-                    directives.push(Directive::TildePercent);
+                    directives.push(Directive::Newline);
+                    chars.next();
+                }
+                Some('*') => {
+                    directives.push(Directive::Skip);
                     chars.next();
                 }
                 Some('{') => {
                     chars.next();
-                    let iteration = parse_string(chars, token.clone())?;
+                    let iteration = parse_string(chars, token.clone(), State::Loop)?;
                     directives.push(Directive::Iteration(iteration));
                 }
                 Some('}') => {
                     chars.next();
                     return Ok(directives);
+                }
+                Some('^') => {
+                    if state != State::Loop {
+                        return Err(syn::Error::new_spanned(
+                            token,
+                            "break directive `^` not inside loop",
+                        ));
+                    }
+                    directives.push(Directive::Break);
+                    chars.next();
                 }
                 Some(directive) => {
                     return Err(syn::Error::new_spanned(
