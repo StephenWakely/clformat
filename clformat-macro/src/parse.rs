@@ -1,5 +1,16 @@
+#![allow(warnings)]
 use std::iter::Peekable;
 
+use nom::{
+    branch::alt,
+    bytes::complete::{tag, take_till1},
+    character::complete::{anychar, digit1},
+    combinator::{map, map_res},
+    error::Error,
+    multi::{many0, many1, separated_list0},
+    sequence::{delimited, preceded, tuple},
+    IResult,
+};
 use syn::{token::Token, LitStr};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -7,6 +18,12 @@ pub enum Directive {
     TildeA,
     TildeS,
     TildeD,
+    Decimal {
+        min_columns: usize,
+        pad_char: char,
+        comma_char: char,
+        comma_interval: usize,
+    },
     Break,
     Newline,
     Skip,
@@ -30,85 +47,163 @@ pub fn parse_format_string(
     token: LitStr,
     format_string: &str,
 ) -> Result<Vec<Directive>, syn::Error> {
-    let mut chars = format_string.chars().peekable();
-    parse_string(&mut chars, token, State::default())
+    parse_string(format_string)
+        .map_err(|err| {
+            dbg!(&err);
+            syn::Error::new_spanned(token, err.to_string())
+        })
+        .map(|(_, result)| {
+            dbg!(&result);
+            result
+        })
 }
 
-fn parse_string(
-    chars: &mut Peekable<std::str::Chars>,
-    token: LitStr,
-    state: State,
-) -> Result<Vec<Directive>, syn::Error> {
-    let mut directives = Vec::new();
-    let mut literal = String::new();
-    while let Some(c) = chars.next() {
-        if c == '~' {
-            if !literal.is_empty() {
-                directives.push(Directive::Literal(literal));
-                literal = String::new();
-            }
+/// http://www.lispworks.com/documentation/lw50/CLHS/Body/22_c.htm
+fn parse_string(input: &str) -> IResult<&str, Vec<Directive>> {
+    many1(segment)(input)
+}
 
-            match chars.peek() {
-                Some('A') => {
-                    directives.push(Directive::TildeA);
-                    chars.next();
-                }
-                Some('S') => {
-                    directives.push(Directive::TildeS);
-                    chars.next();
-                }
-                Some('D') => {
-                    directives.push(Directive::TildeD);
-                    chars.next();
-                }
-                Some('%') => {
-                    directives.push(Directive::Newline);
-                    chars.next();
-                }
-                Some('*') => {
-                    directives.push(Directive::Skip);
-                    chars.next();
-                }
-                Some('{') => {
-                    chars.next();
-                    let iteration = parse_string(chars, token.clone(), State::Loop)?;
-                    directives.push(Directive::Iteration(iteration));
-                }
-                Some('}') => {
-                    chars.next();
-                    return Ok(directives);
-                }
-                Some('^') => {
-                    if state != State::Loop {
-                        return Err(syn::Error::new_spanned(
-                            token,
-                            "break directive `^` not inside loop",
-                        ));
-                    }
-                    directives.push(Directive::Break);
-                    chars.next();
-                }
-                Some(directive) => {
-                    return Err(syn::Error::new_spanned(
-                        token,
-                        format!("Invalid directive: {directive}"),
-                    ))
-                }
-                None => {
-                    // Lone tilde at the end of the string
-                }
-            }
+fn segment(input: &str) -> IResult<&str, Directive> {
+    alt((literal, iteration, directive))(input)
+}
+
+fn literal(input: &str) -> IResult<&str, Directive> {
+    map(take_till1(|c| c == '~'), |s: &str| {
+        Directive::Literal(s.to_string())
+    })(input)
+}
+
+fn iteration(input: &str) -> IResult<&str, Directive> {
+    let (mut input, _) = tag("~{")(input)?;
+    let mut result = Vec::new();
+
+    loop {
+        if input.starts_with("~}") {
+            return Ok((&input[2..], Directive::Iteration(result)));
+        } else if input.is_empty() {
+            // No end directive at the end of the string could be regarded as an error,
+            // but lets be permissive for now.
+            return Ok((&input, Directive::Iteration(result)));
         } else {
-            literal.push(c);
+            let (new_input, directive) = segment(input)?;
+            input = new_input;
+            result.push(directive);
         }
     }
+}
 
-    Ok(directives)
+fn directive(input: &str) -> IResult<&str, Directive> {
+    map_res(
+        preceded(tag("~"), tuple((params, anychar))),
+        |(params, directive)| match directive.to_ascii_uppercase() {
+            'A' => Ok(Directive::TildeA),
+            'S' => Ok(Directive::TildeS),
+            'D' => Ok(Directive::TildeD),
+            '%' => Ok(Directive::Newline),
+            '*' => Ok(Directive::Skip),
+            '^' => {
+                // if state != State::Loop {
+                //     return Err(syn::Error::new_spanned(
+                //         token,
+                //         "break directive `^` not inside loop",
+                //     ));
+                // }
+                Ok(Directive::Break)
+            }
+            directive => {
+                Err("duff directive")
+                // return Err(syn::Error::new_spanned(
+                //     token,
+                //     format!("Invalid directive: {directive}"),
+                // ))
+            }
+        },
+    )(input)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Param {
+    Char(char),
+    Num(isize),
+}
+
+#[derive(Default, Debug, PartialEq, Eq)]
+struct Params {
+    parsed: Vec<Param>,
+}
+
+impl Params {
+    fn new(parsed: Vec<Param>) -> Self {
+        Self { parsed }
+    }
+}
+
+/// Parses a single parameter either:
+/// -  an integer
+/// -  or a single character preceeded by a quote (')
+fn param(input: &str) -> IResult<&str, Param> {
+    alt((
+        map(digit1, |nums: &str| {
+            Param::Num(nums.parse().expect("numbers should have been parsed"))
+        }),
+        map(preceded(tag("'"), anychar), Param::Char),
+    ))(input)
+}
+
+/// Nums are parsed as numbers.
+/// Chars are preceeded with a quote `'`.
+fn params(input: &str) -> IResult<&str, Params> {
+    map(separated_list0(tag(","), param), Params::new)(input)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_literal() {
+        assert_eq!(
+            ("", Directive::Literal("zork".to_string())),
+            literal("zork").unwrap()
+        );
+        assert_eq!(
+            ("~A", Directive::Literal("zork".to_string())),
+            literal("zork~A").unwrap()
+        );
+    }
+
+    #[test]
+    fn parses_params() {
+        assert_eq!(
+            (
+                "a",
+                Params {
+                    parsed: vec![Param::Num(42)]
+                }
+            ),
+            params("42a").unwrap()
+        );
+
+        assert_eq!(
+            (
+                "a",
+                Params {
+                    parsed: vec![Param::Num(42), Param::Char(' ')]
+                }
+            ),
+            params("42,' a").unwrap()
+        );
+
+        assert_eq!(
+            (
+                "a",
+                Params {
+                    parsed: vec![Param::Num(42), Param::Char(' '), Param::Num(234)]
+                }
+            ),
+            params("42,' ,234a").unwrap()
+        );
+    }
 
     #[test]
     fn parses() {
@@ -122,7 +217,7 @@ mod tests {
                 Directive::TildeA,
                 Directive::Literal("! Value: ".to_string()),
                 Directive::TildeD,
-                Directive::TildePercent
+                Directive::Newline
             ],
             parsed
         );
@@ -142,7 +237,7 @@ mod tests {
                     Directive::Literal("nork".to_string()),
                     Directive::TildeA,
                 ]),
-                Directive::TildePercent
+                Directive::Newline
             ],
             parsed
         );

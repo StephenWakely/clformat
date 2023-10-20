@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use parse::{parse_format_string, Directive};
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
@@ -118,6 +116,13 @@ impl FormatInput {
                     }
                     .to_tokens(tokens);
                 }
+                #[allow(warnings)]
+                Directive::Decimal {
+                    min_columns,
+                    pad_char,
+                    comma_char,
+                    comma_interval,
+                } => todo!(),
             }
         }
     }
