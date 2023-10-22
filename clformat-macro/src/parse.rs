@@ -5,7 +5,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_till1},
     character::complete::{anychar, digit1},
-    combinator::{map, map_res},
+    combinator::{cut, map, map_res},
     error::Error,
     multi::{many0, many1, separated_list0},
     sequence::{delimited, preceded, tuple},
@@ -60,7 +60,7 @@ pub fn parse_format_string(
 
 /// http://www.lispworks.com/documentation/lw50/CLHS/Body/22_c.htm
 fn parse_string(input: &str) -> IResult<&str, Vec<Directive>> {
-    many1(segment)(input)
+    many1(cut(segment))(input)
 }
 
 fn segment(input: &str) -> IResult<&str, Directive> {
