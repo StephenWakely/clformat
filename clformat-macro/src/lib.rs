@@ -10,6 +10,7 @@ use syn::{
 };
 
 mod parse;
+mod parse_error;
 
 struct FormatInput {
     formatstr: Vec<Directive>,
