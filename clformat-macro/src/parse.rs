@@ -19,7 +19,6 @@ use crate::parse_error::FormatError;
 pub enum Directive {
     TildeA,
     TildeS,
-    TildeD,
     Decimal {
         min_columns: usize,
         pad_char: char,
@@ -110,7 +109,19 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
             |(params, directive)| match directive.to_ascii_uppercase() {
                 'A' => Ok(Directive::TildeA),
                 'S' => Ok(Directive::TildeS),
-                'D' => Ok(Directive::TildeD),
+                'D' => {
+                    let min_columns = params.get_num(0, 0)? as usize;
+                    let pad_char = params.get_char(1, ' ')?;
+                    let comma_char = params.get_char(2, ',')?;
+                    let comma_interval = params.get_num(3, 3)? as usize;
+
+                    Ok(Directive::Decimal {
+                        min_columns,
+                        pad_char,
+                        comma_char,
+                        comma_interval,
+                    })
+                }
                 '%' => Ok(Directive::Newline),
                 '*' => Ok(Directive::Skip),
                 '^' => {
@@ -140,6 +151,22 @@ struct Params {
 impl Params {
     fn new(parsed: Vec<Param>) -> Self {
         Self { parsed }
+    }
+
+    pub fn get_num(&self, idx: usize, def: isize) -> Result<isize, String> {
+        match self.parsed.get(idx) {
+            Some(Param::Char(c)) => Err(format!("expected number, found char {c}")),
+            Some(Param::Num(i)) => Ok(*i),
+            None => Ok(def),
+        }
+    }
+
+    pub fn get_char(&self, idx: usize, def: char) -> Result<char, String> {
+        match self.parsed.get(idx) {
+            Some(Param::Num(i)) => Err(format!("expected character, found number {i}")),
+            Some(Param::Char(c)) => Ok(*c),
+            None => Ok(def),
+        }
     }
 }
 

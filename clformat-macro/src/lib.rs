@@ -74,10 +74,6 @@ impl FormatInput {
                     let expression = expressions.next().unwrap();
                     quote! { write!(result, "{:?}", #expression).unwrap(); }.to_tokens(tokens)
                 }
-                Directive::TildeD => {
-                    let expression = expressions.next().unwrap();
-                    quote! { write!(result, "{}", #expression).unwrap(); }.to_tokens(tokens)
-                }
                 Directive::Newline => quote! { write!(result, "\n").unwrap(); }.to_tokens(tokens),
                 Directive::Literal(literal) => {
                     quote! { write!(result, #literal).unwrap(); }.to_tokens(tokens)
@@ -123,7 +119,11 @@ impl FormatInput {
                     pad_char,
                     comma_char,
                     comma_interval,
-                } => todo!(),
+                } => {
+                    let expression = expressions.next().unwrap();
+                    let format_str = format!("{{:{pad_char}>{min_columns}}}");
+                    quote! { write!(result, #format_str, #expression).unwrap();}.to_tokens(tokens)
+                }
             }
         }
     }
