@@ -3,7 +3,7 @@ use std::{fmt::Write, io::Write as _, iter::Peekable, ops::Deref};
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_till1},
+    bytes::complete::{tag, take_till1, take_while},
     character::complete::{anychar, digit1},
     combinator::{cut, eof, map, map_res},
     multi::{many0, many1, many_till, separated_list0},
@@ -24,6 +24,8 @@ pub enum Directive {
         pad_char: char,
         comma_char: char,
         comma_interval: usize,
+        print_commas: bool,
+        print_sign: bool,
     },
     Break,
     Newline,
@@ -105,8 +107,8 @@ fn iteration(input: &str) -> FormatResult<Directive> {
 fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
     move |input| {
         map_res(
-            preceded(tag("~"), tuple((params, anychar))),
-            |(params, directive)| match directive.to_ascii_uppercase() {
+            preceded(tag("~"), tuple((params, modifiers, anychar))),
+            |(params, modifiers, directive)| match directive.to_ascii_uppercase() {
                 'A' => Ok(Directive::TildeA),
                 'S' => Ok(Directive::TildeS),
                 'D' => {
@@ -120,6 +122,8 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
                         pad_char,
                         comma_char,
                         comma_interval,
+                        print_commas: modifiers.colon,
+                        print_sign: modifiers.at,
                     })
                 }
                 '%' => Ok(Directive::Newline),
@@ -188,6 +192,25 @@ fn params(input: &str) -> FormatResult<Params> {
     map(separated_list0(tag(","), param), Params::new)(input)
 }
 
+/// Directives can be modified with a colon (`:`) or an ampersat (`@`).
+/// Modifiers have different meanings depending on the directive.
+struct Modifiers {
+    colon: bool,
+    at: bool,
+}
+
+fn modifiers(input: &str) -> FormatResult<Modifiers> {
+    let (input, modifiers) = take_while(|c| c == ':' || c == '@')(input)?;
+
+    Ok((
+        input,
+        Modifiers {
+            colon: modifiers.contains(':'),
+            at: modifiers.contains('@'),
+        },
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +276,8 @@ mod tests {
                     pad_char: ' ',
                     comma_char: ',',
                     comma_interval: 3,
+                    print_commas: false,
+                    print_sign: false,
                 },
                 Directive::Newline
             ],

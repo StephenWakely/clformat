@@ -67,8 +67,8 @@ where
 {
     fn to_string(&self) -> String {
         match &self.error {
-            ErrorType::Nom => format!("internal error"),
-            ErrorType::Ours(error) => format!("{}", error),
+            ErrorType::Nom => "internal error".to_string(),
+            ErrorType::Ours(error) => error.to_string(),
         }
     }
 }
