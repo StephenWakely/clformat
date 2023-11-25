@@ -122,7 +122,18 @@ impl FormatInput {
                 } => {
                     let expression = expressions.next().unwrap();
                     let format_str = format!("{{:{pad_char}>{min_columns}}}");
-                    quote! { write!(result, #format_str, #expression).unwrap();}.to_tokens(tokens)
+                    quote! {
+                        let decimal = ::clformat::Decimal {
+                            min_columns: #min_columns,
+                            pad_char: #pad_char,
+                            comma_char: #comma_char,
+                            comma_interval: #comma_interval,
+                        };
+
+                        // write!(result, "{:?}", decimal).unwrap();
+                        write!(result, #format_str, #expression).unwrap();
+                    }
+                    .to_tokens(tokens)
                 }
             }
         }

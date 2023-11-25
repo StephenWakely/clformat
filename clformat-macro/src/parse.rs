@@ -248,7 +248,12 @@ mod tests {
                 Directive::Literal("Hello, ".to_string()),
                 Directive::TildeA,
                 Directive::Literal("! Value: ".to_string()),
-                Directive::TildeD,
+                Directive::Decimal {
+                    min_columns: 0,
+                    pad_char: ' ',
+                    comma_char: ',',
+                    comma_interval: 3,
+                },
                 Directive::Newline
             ],
             parsed
