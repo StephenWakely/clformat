@@ -36,12 +36,16 @@ mod tests {
 
     #[test]
     fn decimals() {
-        let num = 4200;
+        let num = 4200_isize;
         assert_eq!("4200", clformat!("~D", num));
         assert_eq!("4,200", clformat!("~:D", num));
 
-        let num = -4200;
+        let num = -4200_isize;
         assert_eq!("-4,200", clformat!("~:D", num));
         assert_eq!("____-4,200", clformat!("~10,'_:D", num));
+
+        let num = 4200_usize;
+        assert_eq!("4200", clformat!("~D", num));
+        assert_eq!("4,200", clformat!("~:D", num));
     }
 }
