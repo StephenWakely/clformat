@@ -17,12 +17,31 @@ use syn::{token::Token, LitStr};
 use crate::parse_error::FormatError;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Alignment {
+    Left,
+    Right,
+    Centre,
+}
+
+impl From<Modifiers> for Alignment {
+    fn from(value: Modifiers) -> Self {
+        match (value.colon, value.at) {
+            (true, true) => Self::Centre,
+            (true, false) => Self::Right,
+            (false, true) => Self::Left,
+            (false, false) => Self::Left,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Directive {
     Align {
         min_columns: usize,
         col_inc: usize,
         min_pad: usize,
         pad_char: char,
+        direction: Alignment,
         inner: Vec<Directive>,
     },
     TildeA,
@@ -93,7 +112,11 @@ fn literal(input: &str) -> FormatResult<Directive> {
     })(input)
 }
 
-fn params_to_align(params: Params, inner: Vec<Directive>) -> Result<Directive, String> {
+fn params_to_align(
+    params: Params,
+    modifiers: Modifiers,
+    inner: Vec<Directive>,
+) -> Result<Directive, String> {
     let min_columns = params.get_num(0, 0)? as usize;
     let col_inc = params.get_num(1, 0)? as usize;
     let min_pad = params.get_num(2, 0)? as usize;
@@ -104,6 +127,7 @@ fn params_to_align(params: Params, inner: Vec<Directive>) -> Result<Directive, S
         col_inc,
         min_pad,
         pad_char,
+        direction: modifiers.into(),
         inner,
     }))
 }
@@ -120,7 +144,7 @@ fn alignment(input: &str) -> FormatResult<Directive> {
         if input.starts_with("~>") {
             return Ok((
                 &input[2..],
-                params_to_align(params, result).map_err(|err| {
+                params_to_align(params, modifiers, result).map_err(|err| {
                     nom::Err::Error(FormatError::from_external_error(
                         input,
                         nom::error::ErrorKind::Tag,
@@ -133,7 +157,7 @@ fn alignment(input: &str) -> FormatResult<Directive> {
             // but lets be permissive for now.
             return Ok((
                 &input,
-                params_to_align(params, result).map_err(|err| {
+                params_to_align(params, modifiers, result).map_err(|err| {
                     nom::Err::Error(FormatError::from_external_error(
                         input,
                         nom::error::ErrorKind::Tag,
@@ -384,6 +408,53 @@ mod tests {
                     col_inc: 0,
                     min_pad: 0,
                     pad_char: ' ',
+                    direction: Alignment::Left,
+                },
+                Directive::Newline,
+            ],
+            parsed
+        );
+    }
+
+    #[test]
+    fn parses_right_alignment() {
+        let format_string = "zork ~10:<~A~>~%";
+        let token = LitStr::new("zork", proc_macro2::Span::call_site());
+        let parsed = parse_format_string(token, format_string).unwrap();
+
+        assert_eq!(
+            vec![
+                Directive::Literal("zork ".to_string()),
+                Directive::Align {
+                    inner: vec![Directive::TildeA],
+                    min_columns: 10,
+                    col_inc: 0,
+                    min_pad: 0,
+                    pad_char: ' ',
+                    direction: Alignment::Right,
+                },
+                Directive::Newline,
+            ],
+            parsed
+        );
+    }
+
+    #[test]
+    fn parses_centre_alignment() {
+        let format_string = "zork ~10:@<~A~>~%";
+        let token = LitStr::new("zork", proc_macro2::Span::call_site());
+        let parsed = parse_format_string(token, format_string).unwrap();
+
+        assert_eq!(
+            vec![
+                Directive::Literal("zork ".to_string()),
+                Directive::Align {
+                    inner: vec![Directive::TildeA],
+                    min_columns: 10,
+                    col_inc: 0,
+                    min_pad: 0,
+                    pad_char: ' ',
+                    direction: Alignment::Centre,
                 },
                 Directive::Newline,
             ],

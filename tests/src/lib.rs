@@ -4,14 +4,6 @@ mod tests {
 
     #[test]
     fn it_works() {
-        // let x = vec!["ook", "onk", "nork", "nonk"];
-        // let y = 32;
-
-        // let x = clformat!("Hello there, ~{ ~A~*~^,~}~%~10,'-D!", x, y);
-
-        // let expected = "Hello there,  ook, nork\n--------32!";
-        // assert_eq!(expected, x);
-
         let dr = "Dr Ponk";
         let x = clformat!("Hello, ~A", dr);
 
@@ -47,5 +39,38 @@ mod tests {
         let num = 4200_usize;
         assert_eq!("4200", clformat!("~D", num));
         assert_eq!("4,200", clformat!("~:D", num));
+    }
+
+    #[test]
+    fn alignment() {
+        let text = "zogwobble";
+        assert_eq!("  zogwobble  ", clformat!("~13:@<~A~>", text));
+        assert_eq!("zogwobble----", clformat!("~13,0,0,'-<~A~>", text));
+        assert_eq!("zogwobble----", clformat!("~13,0,0,'-@<~A~>", text));
+        assert_eq!("----zogwobble", clformat!("~13,0,0,'-:<~A~>", text));
+        assert_eq!("--zogwobble--", clformat!("~13,0,0,'-:@<~A~>", text));
+    }
+
+    #[derive(Debug)]
+    struct Nork;
+
+    #[test]
+    fn alignment_debug() {
+        // Output and align a debug output of a struct and a string.
+        let text = "wobble";
+        assert_eq!("  Norkwobble  ", clformat!("~14:@<~S~A~>", Nork, text));
+        assert_eq!("Norkwobble----", clformat!("~14,0,0,'-<~S~A~>", Nork, text));
+        assert_eq!(
+            "Norkwobble----",
+            clformat!("~14,0,0,'-@<~S~A~>", Nork, text)
+        );
+        assert_eq!(
+            "----Norkwobble",
+            clformat!("~14,0,0,'-:<~S~A~>", Nork, text)
+        );
+        assert_eq!(
+            "--Norkwobble--",
+            clformat!("~14,0,0,'-:@<~S~A~>", Nork, text)
+        );
     }
 }

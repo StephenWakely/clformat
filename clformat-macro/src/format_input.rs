@@ -1,5 +1,6 @@
 use quote::quote;
 use quote::ToTokens;
+use syn::parse_quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
@@ -7,6 +8,7 @@ use syn::{
     Expr, LitStr,
 };
 
+use crate::parse::Alignment;
 use crate::parse::{parse_format_string, Directive};
 
 pub(crate) struct FormatInput {
@@ -26,7 +28,7 @@ impl Parse for FormatInput {
         let s = formatlit.value().clone();
         let formatstr = parse_format_string(formatlit, &s)?;
 
-        let _: Comma = input.parse().unwrap();
+        let _: Comma = input.parse().expect("parse comma");
         let expressions = Punctuated::<Expr, Comma>::parse_terminated(input)?;
 
         Ok(Self {
@@ -38,7 +40,7 @@ impl Parse for FormatInput {
 
 impl ToTokens for FormatInput {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let expressions = self.expressions.iter();
+        let mut expressions = self.expressions.iter();
 
         quote! {
             use std::fmt::Write;
@@ -46,48 +48,54 @@ impl ToTokens for FormatInput {
         }
         .to_tokens(tokens);
 
-        write_expressions(expressions, &self.formatstr, tokens);
+        write_expressions(
+            &mut expressions,
+            &self.formatstr,
+            tokens,
+            parse_quote!(result),
+        );
 
         quote! { result }.to_tokens(tokens);
     }
 }
 
 fn write_expressions<'a, T>(
-    mut expressions: T,
+    expressions: &mut T,
     directives: &[Directive],
     tokens: &mut proc_macro2::TokenStream,
+    writer: Expr,
 ) where
-    T: Iterator<Item = &'a Expr>,
+    T: Iterator<Item = &'a Expr> + Clone,
 {
     for directive in directives {
         match directive {
             Directive::TildeA => {
-                let expression = expressions.next().unwrap();
-                quote! { write!(result, "{}", #expression).unwrap(); }.to_tokens(tokens)
+                let expression = expressions.next().expect("enough parameters");
+                quote! { write!(#writer, "{}", #expression).unwrap(); }.to_tokens(tokens)
             }
             Directive::TildeS => {
-                let expression = expressions.next().unwrap();
-                quote! { write!(result, "{:?}", #expression).unwrap(); }.to_tokens(tokens)
+                let expression = expressions.next().expect("enough parameters");
+                quote! { write!(#writer, "{:?}", #expression).unwrap(); }.to_tokens(tokens)
             }
-            Directive::Newline => quote! { write!(result, "\n").unwrap(); }.to_tokens(tokens),
+            Directive::Newline => quote! { write!(#writer, "\n").unwrap(); }.to_tokens(tokens),
             Directive::Literal(literal) => {
-                quote! { write!(result, #literal).unwrap(); }.to_tokens(tokens)
+                quote! { write!(#writer, #literal).unwrap(); }.to_tokens(tokens)
             }
             Directive::Skip => {
-                let expression = expressions.next().unwrap();
+                let expression = expressions.next().expect("enough parameters");
                 // Note we have to output the expression since loop expressions involve side effects.
                 quote! {  let _ = #expression; }.to_tokens(tokens)
             }
             Directive::Iteration(directives) => {
-                let expression = expressions.next().unwrap();
+                let expression = expressions.next().expect("enough parameters");
                 let iter = syn::parse_str::<Expr>("zork.next().unwrap()")
                     .expect("static string should be valid syntax");
-                let nested = IndexedExpression {
+                let mut nested = IndexedExpression {
                     count: 0,
                     expr: &iter,
                 };
                 let mut block = proc_macro2::TokenStream::new();
-                write_expressions(nested, directives, &mut block);
+                write_expressions(&mut nested, directives, &mut block, writer.clone());
 
                 quote! {
                     let mut zork = #expression.into_iter().peekable();
@@ -116,7 +124,7 @@ fn write_expressions<'a, T>(
                 print_commas,
                 print_sign,
             } => {
-                let expression = expressions.next().unwrap();
+                let expression = expressions.next().expect("enough parameters");
                 quote! {
                     let decimal = ::clformat::Decimal::new(
                          #min_columns,
@@ -130,22 +138,68 @@ fn write_expressions<'a, T>(
 
                     // dbg!(&decimal);
                     for c in decimal {
-                        write!(result, "{}", c).unwrap();
+                        write!(#writer, "{}", c).unwrap();
                     }
                 }
                 .to_tokens(tokens)
             }
             Directive::Align {
                 min_columns,
-                col_inc,
-                min_pad,
                 pad_char,
+                direction,
                 inner,
-            } => todo!(),
+                ..
+            } => {
+                // Alignment is achieved by writing the contained tokens twice.
+                // First we write to a ruler writer which measures the length of the text, this is used to
+                // calculate the padding, which we then output before writing the blocks properly.
+                let mut ruler_block = proc_macro2::TokenStream::new();
+                let mut writer_block = proc_macro2::TokenStream::new();
+                write_expressions(
+                    &mut expressions.clone(),
+                    inner,
+                    &mut ruler_block,
+                    parse_quote!(ruler),
+                );
+                write_expressions(expressions, inner, &mut writer_block, writer.clone());
+
+                let fill = format!("{{:{pad_char}<width$}}");
+
+                let left_fill = match direction {
+                    Alignment::Left => Default::default(),
+                    Alignment::Right => quote! {
+                        write!(#writer, #fill, "", width = #min_columns - ruler.length()).unwrap();
+                    },
+                    Alignment::Centre => quote! {
+                        write!(#writer, #fill, "", width = (#min_columns - ruler.length()) / 2).unwrap();
+                    },
+                };
+
+                let right_fill = match direction {
+                    Alignment::Left => quote! {
+                        write!(#writer, #fill, "", width = #min_columns - ruler.length()).unwrap();
+                    },
+                    Alignment::Right => Default::default(),
+                    Alignment::Centre => quote! {
+                        write!(#writer, #fill, "", width = (#min_columns - ruler.length()) / 2).unwrap();
+                    },
+                };
+
+                quote! {
+                    let mut ruler = ::clformat::Ruler::default();
+                    #ruler_block
+
+                    #left_fill
+                    #writer_block
+                    #right_fill
+                }
+                .to_tokens(tokens)
+            }
         }
     }
 }
 
+#[derive(Clone)]
 struct IndexedExpression<'a> {
     count: usize,
     expr: &'a Expr,
