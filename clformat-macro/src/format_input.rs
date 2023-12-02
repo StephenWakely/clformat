@@ -135,6 +135,13 @@ fn write_expressions<'a, T>(
                 }
                 .to_tokens(tokens)
             }
+            Directive::Align {
+                min_columns,
+                col_inc,
+                min_pad,
+                pad_char,
+                inner,
+            } => todo!(),
         }
     }
 }
