@@ -42,20 +42,17 @@ impl ToTokens for FormatInput {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let mut expressions = self.expressions.iter();
 
+        let var_name: Expr = parse_quote!(__formatcl_result);
+
         quote! {
             use std::fmt::Write;
-            let mut result = String::new();
+            let mut #var_name = String::new();
         }
         .to_tokens(tokens);
 
-        write_expressions(
-            &mut expressions,
-            &self.formatstr,
-            tokens,
-            parse_quote!(result),
-        );
+        write_expressions(&mut expressions, &self.formatstr, tokens, var_name.clone());
 
-        quote! { result }.to_tokens(tokens);
+        var_name.to_tokens(tokens);
     }
 }
 
@@ -126,19 +123,15 @@ fn write_expressions<'a, T>(
             } => {
                 let expression = expressions.next().expect("enough parameters");
                 quote! {
-                    let decimal = ::clformat::Decimal::new(
-                         #min_columns,
-                         #pad_char,
-                         #comma_char,
-                         #comma_interval,
-                         #print_commas,
-                         #print_sign,
-                         #expression,
-                    );
-
-                    // dbg!(&decimal);
-                    for c in decimal {
-                        write!(#writer, "{}", c).unwrap();
+                    for __formatcl_c in ::clformat::Decimal::new(
+                                             #min_columns,
+                                             #pad_char,
+                                             #comma_char,
+                                             #comma_interval,
+                                             #print_commas,
+                                             #print_sign,
+                                             #expression) {
+                        write!(#writer, "{}", __formatcl_c).unwrap();
                     }
                 }
                 .to_tokens(tokens)
@@ -155,11 +148,12 @@ fn write_expressions<'a, T>(
                 // calculate the padding, which we then output before writing the blocks properly.
                 let mut ruler_block = proc_macro2::TokenStream::new();
                 let mut writer_block = proc_macro2::TokenStream::new();
+                let ruler_var: Expr = parse_quote!(__formatcl_ruler);
                 write_expressions(
                     &mut expressions.clone(),
                     inner,
                     &mut ruler_block,
-                    parse_quote!(ruler),
+                    ruler_var.clone(),
                 );
                 write_expressions(expressions, inner, &mut writer_block, writer.clone());
 
@@ -168,25 +162,25 @@ fn write_expressions<'a, T>(
                 let left_fill = match direction {
                     Alignment::Left => Default::default(),
                     Alignment::Right => quote! {
-                        write!(#writer, #fill, "", width = #min_columns - ruler.length()).unwrap();
+                        write!(#writer, #fill, "", width = #min_columns - #ruler_var.length()).unwrap();
                     },
                     Alignment::Centre => quote! {
-                        write!(#writer, #fill, "", width = (#min_columns - ruler.length()) / 2).unwrap();
+                        write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2).unwrap();
                     },
                 };
 
                 let right_fill = match direction {
                     Alignment::Left => quote! {
-                        write!(#writer, #fill, "", width = #min_columns - ruler.length()).unwrap();
+                        write!(#writer, #fill, "", width = #min_columns - #ruler_var.length()).unwrap();
                     },
                     Alignment::Right => Default::default(),
                     Alignment::Centre => quote! {
-                        write!(#writer, #fill, "", width = (#min_columns - ruler.length()) / 2).unwrap();
+                        write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2).unwrap();
                     },
                 };
 
                 quote! {
-                    let mut ruler = ::clformat::Ruler::default();
+                    let mut #ruler_var = ::clformat::Ruler::default();
                     #ruler_block
 
                     #left_fill
