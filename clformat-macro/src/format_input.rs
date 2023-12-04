@@ -162,20 +162,28 @@ fn write_expressions<'a, T>(
                 let left_fill = match direction {
                     Alignment::Left => Default::default(),
                     Alignment::Right => quote! {
-                        write!(#writer, #fill, "", width = #min_columns - #ruler_var.length()).unwrap();
+                        if #min_columns > #ruler_var.length() {
+                            write!(#writer, #fill, "", width = #min_columns - #ruler_var.length()).unwrap();
+                        }
                     },
                     Alignment::Centre => quote! {
-                        write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2).unwrap();
+                        if #min_columns > #ruler_var.length() {
+                            write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2).unwrap();
+                        }
                     },
                 };
 
                 let right_fill = match direction {
                     Alignment::Left => quote! {
-                        write!(#writer, #fill, "", width = #min_columns - #ruler_var.length()).unwrap();
+                        if #min_columns > #ruler_var.length() {
+                            write!(#writer, #fill, "", width = #min_columns - #ruler_var.length()).unwrap();
+                        }
                     },
                     Alignment::Right => Default::default(),
                     Alignment::Centre => quote! {
-                        write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2).unwrap();
+                        if #min_columns > #ruler_var.length() {
+                            write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2).unwrap();
+                        }
                     },
                 };
 
