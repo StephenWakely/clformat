@@ -13,6 +13,7 @@ use crate::parse::{parse_format_string, Directive};
 
 pub(crate) struct FormatInput {
     formatstr: Vec<Directive>,
+    // writer: Expr,
     expressions: Punctuated<Expr, Comma>,
 }
 
@@ -44,15 +45,29 @@ impl ToTokens for FormatInput {
 
         let var_name: Expr = parse_quote!(__formatcl_result);
 
+        let mut expr_tokens = proc_macro2::TokenStream::new();
+        write_expressions(
+            &mut expressions,
+            &self.formatstr,
+            &mut expr_tokens,
+            var_name.clone(),
+        );
+
         quote! {
             use std::fmt::Write;
             let mut #var_name = String::new();
+            let __formatcl_err: Result<(), _> = '__format_cl__loop: loop {
+                #expr_tokens
+                break '__format_cl__loop Ok(());
+            };
+
+            if __formatcl_err.is_err() {
+                panic!("oh no");
+            }
+
+            #var_name
         }
         .to_tokens(tokens);
-
-        write_expressions(&mut expressions, &self.formatstr, tokens, var_name.clone());
-
-        var_name.to_tokens(tokens);
     }
 }
 
@@ -68,16 +83,38 @@ fn write_expressions<'a, T>(
         match directive {
             Directive::TildeA => {
                 let expression = expressions.next().expect("enough parameters");
-                quote! { write!(#writer, "{}", #expression).unwrap(); }.to_tokens(tokens)
+                quote! {
+                     let r = write!(#writer, "{}", #expression);
+                     if r.is_err() {
+                        break '__format_cl__loop r;
+                    }
+                }
+                .to_tokens(tokens)
             }
             Directive::TildeS => {
                 let expression = expressions.next().expect("enough parameters");
-                quote! { write!(#writer, "{:?}", #expression).unwrap(); }.to_tokens(tokens)
+                quote! {
+                    let r = write!(#writer, "{:?}", #expression);
+                    if r.is_err() {
+                        break '__format_cl__loop r;
+                    }
+                }
+                .to_tokens(tokens)
             }
-            Directive::Newline => quote! { write!(#writer, "\n").unwrap(); }.to_tokens(tokens),
-            Directive::Literal(literal) => {
-                quote! { write!(#writer, #literal).unwrap(); }.to_tokens(tokens)
+            Directive::Newline => quote! {
+               let r = write!(#writer, "\n");
+               if r.is_err() {
+                   break '__format_cl__loop r;
+               }
             }
+            .to_tokens(tokens),
+            Directive::Literal(literal) => quote! {
+               let r = write!(#writer, #literal);
+               if r.is_err() {
+                   break '__format_cl__loop r;
+               }
+            }
+            .to_tokens(tokens),
             Directive::Skip => {
                 let expression = expressions.next().expect("enough parameters");
                 // Note we have to output the expression since loop expressions involve side effects.
@@ -85,7 +122,7 @@ fn write_expressions<'a, T>(
             }
             Directive::Iteration(directives) => {
                 let expression = expressions.next().expect("enough parameters");
-                let iter = syn::parse_str::<Expr>("zork.next().unwrap()")
+                let iter = syn::parse_str::<Expr>("__formatcl_iteration.next().unwrap()")
                     .expect("static string should be valid syntax");
                 let mut nested = IndexedExpression {
                     count: 0,
@@ -95,9 +132,9 @@ fn write_expressions<'a, T>(
                 write_expressions(&mut nested, directives, &mut block, writer.clone());
 
                 quote! {
-                    let mut zork = #expression.into_iter().peekable();
+                    let mut __formatcl_iteration = #expression.into_iter().peekable();
                     loop {
-                        if zork.peek().is_none() {
+                        if __formatcl_iteration.peek().is_none() {
                             break;
                         }
                         { #block }
@@ -107,7 +144,7 @@ fn write_expressions<'a, T>(
             }
             Directive::Break => {
                 quote! {
-                    if zork.peek().is_none() {
+                    if __formatcl_iteration.peek().is_none() {
                         break;
                     }
                 }
@@ -131,7 +168,10 @@ fn write_expressions<'a, T>(
                                              #print_commas,
                                              #print_sign,
                                              #expression) {
-                        write!(#writer, "{}", __formatcl_c).unwrap();
+                        let r = write!(#writer, "{}", __formatcl_c);
+                        if r.is_err() {
+                            break '__format_cl__loop r;
+                        }
                     }
                 }
                 .to_tokens(tokens)
@@ -163,12 +203,18 @@ fn write_expressions<'a, T>(
                     Alignment::Left => Default::default(),
                     Alignment::Right => quote! {
                         if #min_columns > #ruler_var.length() {
-                            write!(#writer, #fill, "", width = #min_columns - #ruler_var.length()).unwrap();
+                            let r = write!(#writer, #fill, "", width = #min_columns - #ruler_var.length());
+                            if r.is_err() {
+                                break '__format_cl__loop r;
+                            }
                         }
                     },
                     Alignment::Centre => quote! {
                         if #min_columns > #ruler_var.length() {
-                            write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2).unwrap();
+                            let r = write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2);
+                            if r.is_err() {
+                                break '__format_cl__loop r;
+                            }
                         }
                     },
                 };
@@ -176,13 +222,19 @@ fn write_expressions<'a, T>(
                 let right_fill = match direction {
                     Alignment::Left => quote! {
                         if #min_columns > #ruler_var.length() {
-                            write!(#writer, #fill, "", width = #min_columns - #ruler_var.length()).unwrap();
+                            let r = write!(#writer, #fill, "", width = #min_columns - #ruler_var.length());
+                            if r.is_err() {
+                                break '__format_cl__loop r;
+                            }
                         }
                     },
                     Alignment::Right => Default::default(),
                     Alignment::Centre => quote! {
                         if #min_columns > #ruler_var.length() {
-                            write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2).unwrap();
+                            let r = write!(#writer, #fill, "", width = (#min_columns - #ruler_var.length()) / 2);
+                            if r.is_err() {
+                                break '__format_cl__loop r;
+                            }
                         }
                     },
                 };
