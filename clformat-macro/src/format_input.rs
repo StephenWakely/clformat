@@ -11,9 +11,15 @@ use syn::{
 use crate::parse::Alignment;
 use crate::parse::{parse_format_string, Directive};
 
+enum Output {
+    Writer(Expr),
+    String,
+    Stdout,
+}
+
 pub(crate) struct FormatInput {
     formatstr: Vec<Directive>,
-    // writer: Expr,
+    output: Output,
     expressions: Punctuated<Expr, Comma>,
 }
 
@@ -25,6 +31,14 @@ impl std::fmt::Debug for FormatInput {
 
 impl Parse for FormatInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let output: Expr = input.parse()?;
+        let output = match output {
+            Expr::Path(path) if path.path.is_ident("nil") => Output::String,
+            Expr::Path(path) if path.path.is_ident("t") => Output::Stdout,
+            expr => Output::Writer(expr),
+        };
+        let _: Comma = input.parse().expect("parse comma");
+
         let formatlit: LitStr = input.parse()?;
         let s = formatlit.value().clone();
         let formatstr = parse_format_string(formatlit, &s)?;
@@ -34,6 +48,7 @@ impl Parse for FormatInput {
 
         Ok(Self {
             formatstr,
+            output,
             expressions,
         })
     }
@@ -53,9 +68,28 @@ impl ToTokens for FormatInput {
             var_name.clone(),
         );
 
+        let uses = match self.output {
+            Output::String => {
+                quote! {
+                    use ::std::fmt::Write;
+                    let mut #var_name = String::new();
+                }
+            }
+            Output::Stdout => {
+                quote! {
+                    use ::std::io::Write;
+                    let mut #var_name = ::std::io::stdout();
+                }
+            }
+            Output::Writer(ref expr) => {
+                quote! {
+                    let mut #var_name = &mut #expr;
+                }
+            }
+        };
+
         quote! {
-            use std::fmt::Write;
-            let mut #var_name = String::new();
+            #uses
             let __formatcl_err: Result<(), _> = '__format_cl__loop: loop {
                 #expr_tokens
                 break '__format_cl__loop Ok(());
