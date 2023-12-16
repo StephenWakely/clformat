@@ -3,10 +3,10 @@ use crate::num::Num;
 
 #[derive(Clone, Debug, Default)]
 pub struct Decimal<T> {
+    number: T,
     pad_char: char,
     comma_char: char,
     comma_interval: usize,
-    number: T,
     divisor: usize,
     digits: usize,
     print_commas: bool,
@@ -62,7 +62,7 @@ impl<T: Num> Decimal<T> {
             comma_char,
             comma_interval,
             print_commas,
-            // Set to true so we dont output a comma at the first char
+            // Set to true so we don't output a comma at the first char
             printed_comma: true,
             print_sign,
             printed_sign: false,

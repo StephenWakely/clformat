@@ -210,6 +210,33 @@ fn write_expressions<'a, T>(
                 }
                 .to_tokens(tokens)
             }
+
+            Directive::Float {
+                width,
+                num_decimal_places,
+                num_digits,
+                scale_factor,
+                overflow_char,
+                pad_char,
+            } => {
+                let expression = expressions.next().expect("enough parameters");
+                quote! {
+                    for __formatcl_c in ::clformat::Float::new(
+                                            #expression,
+                                            #width,
+                                            #num_decimal_places,
+                                            #num_digits,
+                                            #scale_factor,
+                                            #overflow_char,
+                                            #pad_char) {
+                        let r = write!(#writer, "{}", __formatcl_c);
+                        if r.is_err() {
+                            break '__format_cl__loop r;
+                        }
+                    }
+                }
+                .to_tokens(tokens)
+            }
             Directive::Align {
                 min_columns,
                 pad_char,

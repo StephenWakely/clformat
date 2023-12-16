@@ -34,6 +34,10 @@ impl From<Modifiers> for Alignment {
     }
 }
 
+/// The Directives that are supported.
+/// Attempts to conform to the [Hyperspec].
+///
+/// [Hyperspec]: https://www.lispworks.com/documentation/HyperSpec/Body/22_c.htm
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Directive {
     Align {
@@ -53,6 +57,14 @@ pub enum Directive {
         comma_interval: usize,
         print_commas: bool,
         print_sign: bool,
+    },
+    Float {
+        width: usize,
+        num_decimal_places: usize,
+        num_digits: usize,
+        scale_factor: usize,
+        overflow_char: char,
+        pad_char: char,
     },
     Break,
     Newline,
@@ -212,6 +224,23 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
                         comma_interval,
                         print_commas: modifiers.colon,
                         print_sign: modifiers.at,
+                    })
+                }
+                'F' => {
+                    let width = params.get_num(0, 0)? as usize;
+                    let num_decimal_places = params.get_num(1, 0)? as usize;
+                    let num_digits = params.get_num(2, 0)? as usize;
+                    let scale_factor = params.get_num(3, 0)? as usize;
+                    let overflow_char = params.get_char(4, ' ')?;
+                    let pad_char = params.get_char(5, ' ')?;
+
+                    Ok(Directive::Float {
+                        width,
+                        num_decimal_places,
+                        num_digits,
+                        scale_factor,
+                        overflow_char,
+                        pad_char,
                     })
                 }
                 '%' => Ok(Directive::Newline),
