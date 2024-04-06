@@ -214,25 +214,26 @@ fn write_expressions<'a, T>(
             Directive::Float {
                 width,
                 num_decimal_places,
-                num_digits,
-                scale_factor,
-                overflow_char,
                 pad_char,
             } => {
                 let expression = expressions.next().expect("enough parameters");
+                let format = format!(
+                    "{{:{pad_char}>{width}.{num_decimal_places}}}",
+                    width = if *width == 0 {
+                        String::new()
+                    } else {
+                        width.to_string()
+                    },
+                    num_decimal_places = if *num_decimal_places == 0 {
+                        String::new()
+                    } else {
+                        num_decimal_places.to_string()
+                    }
+                );
                 quote! {
-                    for __formatcl_c in ::clformat::Float::new(
-                                            #expression,
-                                            #width,
-                                            #num_decimal_places,
-                                            #num_digits,
-                                            #scale_factor,
-                                            #overflow_char,
-                                            #pad_char) {
-                        let r = write!(#writer, "{}", __formatcl_c);
-                        if r.is_err() {
-                            break '__format_cl__loop r;
-                        }
+                    let r = write!(#writer, #format, #expression);
+                    if r.is_err() {
+                        break '__format_cl__loop r;
                     }
                 }
                 .to_tokens(tokens)

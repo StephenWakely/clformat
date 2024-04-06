@@ -7,6 +7,7 @@ pub trait Num: Copy + PartialOrd {
     fn zero() -> Self;
     fn one() -> Self;
     fn as_u8(self) -> u8;
+    fn as_usize(self) -> usize;
 }
 
 macro_rules! impl_num {
@@ -26,6 +27,10 @@ macro_rules! impl_num {
 
             fn as_u8(self) -> u8 {
                 self as u8
+            }
+
+            fn as_usize(self) -> usize {
+                self as usize
             }
 
             fn zero() -> Self {

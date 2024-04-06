@@ -58,6 +58,17 @@ mod tests {
     }
 
     #[test]
+    fn floats() {
+        let num = std::f64::consts::PI;
+        assert_eq!("3.14", clformat!(nil, "~,2F", num));
+        assert_eq!(" 3.142", clformat!(nil, "~6,3F", num));
+        assert_eq!("--3.141593", clformat!(nil, "~10,6,,,,'-F", num));
+
+        let num = 3.5;
+        assert_eq!("3.50", clformat!(nil, "~,2F", num));
+    }
+
+    #[test]
     fn alignment() {
         let text = "zogwobble";
         assert_eq!("  zogwobble  ", clformat!(nil, "~13:@<~A~>", text));

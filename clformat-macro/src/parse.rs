@@ -61,9 +61,6 @@ pub enum Directive {
     Float {
         width: usize,
         num_decimal_places: usize,
-        num_digits: usize,
-        scale_factor: usize,
-        overflow_char: char,
         pad_char: char,
     },
     Break,
@@ -229,17 +226,14 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
                 'F' => {
                     let width = params.get_num(0, 0)? as usize;
                     let num_decimal_places = params.get_num(1, 0)? as usize;
-                    let num_digits = params.get_num(2, 0)? as usize;
-                    let scale_factor = params.get_num(3, 0)? as usize;
-                    let overflow_char = params.get_char(4, ' ')?;
+                    params.assert_missing(2, "num digits parameter not supported for floats")?;
+                    params.assert_missing(3, "scale factor parameter not supported for floats")?;
+                    params.assert_missing(4, "overflow char parameter not supported for floats")?;
                     let pad_char = params.get_char(5, ' ')?;
 
                     Ok(Directive::Float {
                         width,
                         num_decimal_places,
-                        num_digits,
-                        scale_factor,
-                        overflow_char,
                         pad_char,
                     })
                 }
@@ -262,6 +256,7 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
 enum Param {
     Char(char),
     Num(isize),
+    Missing,
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -274,10 +269,19 @@ impl Params {
         Self { parsed }
     }
 
+    /// For parameters we don't support yet.
+    pub fn assert_missing(&self, idx: usize, msg: &str) -> Result<(), String> {
+        match self.parsed.get(idx) {
+            None | Some(Param::Missing) => Ok(()),
+            _ => Err(msg.to_string()),
+        }
+    }
+
     pub fn get_num(&self, idx: usize, def: isize) -> Result<isize, String> {
         match self.parsed.get(idx) {
             Some(Param::Char(c)) => Err(format!("expected number, found char {c}")),
             Some(Param::Num(i)) => Ok(*i),
+            Some(Param::Missing) => Ok(def),
             None => Ok(def),
         }
     }
@@ -286,6 +290,7 @@ impl Params {
         match self.parsed.get(idx) {
             Some(Param::Num(i)) => Err(format!("expected character, found number {i}")),
             Some(Param::Char(c)) => Ok(*c),
+            Some(Param::Missing) => Ok(def),
             None => Ok(def),
         }
     }
@@ -296,10 +301,11 @@ impl Params {
 /// -  or a single character preceeded by a quote (')
 fn param(input: &str) -> FormatResult<Param> {
     alt((
+        map(preceded(tag("'"), anychar), Param::Char),
         map(digit1, |nums: &str| {
             Param::Num(nums.parse().expect("numbers should have been parsed"))
         }),
-        map(preceded(tag("'"), anychar), Param::Char),
+        map(tag(""), |_: &str| Param::Missing),
     ))(input)
 }
 
@@ -510,6 +516,36 @@ mod tests {
         assert_eq!(
             Err("directive `^` not inside loop".to_string()),
             parsed.map_err(|err| err.to_string())
+        );
+    }
+
+    #[test]
+    fn parse_params() {
+        let (_, res) = params("3,2,3").unwrap();
+        assert_eq!(
+            vec![Param::Num(3), Param::Num(2), Param::Num(3)],
+            res.parsed
+        );
+    }
+
+    #[test]
+    fn parse_missing_params() {
+        let (_, res) = params("3,,3").unwrap();
+        assert_eq!(
+            vec![Param::Num(3), Param::Missing, Param::Num(3)],
+            res.parsed
+        );
+
+        let (_, res) = params(",9,3").unwrap();
+        assert_eq!(
+            vec![Param::Missing, Param::Num(9), Param::Num(3)],
+            res.parsed
+        );
+
+        let (_, res) = params(",,3").unwrap();
+        assert_eq!(
+            vec![Param::Missing, Param::Missing, Param::Num(3)],
+            res.parsed
         );
     }
 }
