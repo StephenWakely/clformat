@@ -103,4 +103,33 @@ mod tests {
             clformat!(nil, "~14,0,0,'-:@<~S~A~>", Nork, text)
         );
     }
+
+    #[test]
+    fn conditional() {
+        let x = 2;
+        assert_eq!("nork", clformat!(nil, "~[zork~;plork~;nork~:;gork~]", x));
+
+        let x = 0;
+        assert_eq!("zork", clformat!(nil, "~[zork~;plork~;nork~:;gork~]", x));
+
+        let x = 100;
+        assert_eq!("gork", clformat!(nil, "~[zork~;plork~;nork~:;gork~]", x));
+    }
+
+    #[test]
+    fn conditional_consumes() {
+        let x = 2;
+        assert_eq!("norkdork", clformat!(nil, "~[zork~;plork~;nork~:;gork~]~A", x, "dork"));
+
+        assert_eq!("nork2dork", clformat!(nil, "~@[zork~;plork~;nork~:;gork~]~A~A", x, "dork"));
+    }
+
+    #[test]
+    fn boolean_conditional() {
+        let x = true;
+        assert_eq!("nork", clformat!(nil, "~:[nork~;zoggle~]", x));
+
+        let x = false;
+        assert_eq!("zoggle", clformat!(nil, "~:[nork~;zoggle~]", x));
+    }
 }

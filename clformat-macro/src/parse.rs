@@ -48,8 +48,13 @@ pub enum Directive {
         direction: Alignment,
         inner: Vec<Directive>,
     },
-    TildeA,
-    TildeS,
+    Break,
+    Conditional {
+        boolean: bool,
+        consumes: bool,
+        default: Option<Vec<Directive>>,
+        choices: Vec<Vec<Directive>>,
+    },
     Decimal {
         min_columns: usize,
         pad_char: char,
@@ -63,11 +68,37 @@ pub enum Directive {
         num_decimal_places: usize,
         pad_char: char,
     },
-    Break,
-    Newline,
-    Skip,
     Iteration(Vec<Directive>),
     Literal(String),
+    Newline,
+    Skip,
+    TildeA,
+    TildeS,
+}
+
+impl Directive {
+    fn new_conditional<'a>(
+        input: &'a str,
+        boolean: bool,
+        consumes: bool,
+        choices: Vec<Vec<Directive>>,
+        default: Option<Vec<Directive>>,
+    ) -> Result<Self, nom::Err<FormatError<&'a str>>> {
+        if boolean && (choices.len() != 2 || default.is_some()) {
+            return Err(nom::Err::Error(FormatError::from_external_error(
+                input,
+                nom::error::ErrorKind::Tag,
+                "boolean conditional must specify exactly two sections",
+            )));
+        }
+
+        Ok(Self::Conditional {
+            boolean,
+            consumes,
+            choices,
+            default,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,7 +143,7 @@ fn parse_string(input: &str) -> FormatResult<Vec<Directive>> {
 }
 
 fn segment(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
-    move |input| alt((literal, alignment, iteration, directive(state)))(input)
+    move |input| alt((literal, alignment, iteration, conditional, directive(state)))(input)
 }
 
 fn literal(input: &str) -> FormatResult<Directive> {
@@ -141,6 +172,68 @@ fn params_to_align(
     }))
 }
 
+/// Conditional is a series of directive separated by `~:` and
+/// enclosed by `~[..~]`.
+fn conditional(input: &str) -> FormatResult<Directive> {
+    let (input, _) = tag("~")(input)?;
+    let (input, params) = params(input)?;
+    let (input, modifiers) = modifiers(input)?;
+    let (mut input, _) = tag("[")(input)?;
+
+    let mut choices = Vec::new();
+    let mut current = Vec::new();
+    let mut default = None;
+    let boolean = modifiers.colon;
+    let consumes = modifiers.at;
+
+    loop {
+        if input.starts_with("~]") {
+            if !current.is_empty() {
+                choices.push(current);
+            }
+
+            return Ok((
+                &input[2..],
+                Directive::new_conditional(input, boolean, consumes, choices, default)?,
+            ));
+        } else if input.is_empty() {
+            // Be permissive.
+            return Ok((
+                &input,
+                Directive::new_conditional(input, boolean, consumes, choices, default)?,
+            ));
+        } else if input.starts_with("~;") {
+            if default.is_some() {
+                return Err(nom::Err::Error(FormatError::from_external_error(
+                    input,
+                    nom::error::ErrorKind::Tag,
+                    "only the last conditional can be default",
+                )));
+            }
+
+            // We are at the start of a new choice
+            choices.push(std::mem::take(&mut current));
+            input = &input[2..];
+        } else if input.starts_with("~:;") {
+            // The default case.
+            choices.push(std::mem::take(&mut current));
+            default = Some(vec![]);
+            input = &input[3..];
+        } else {
+            let (new_input, directive) = segment(State::Loop)(input)?;
+            input = new_input;
+
+            match &mut default {
+                Some(default) => default.push(directive),
+                None => current.push(directive),
+            }
+        }
+    }
+}
+
+/// Alignment is a series of directives enclosed by `~<..~>`.
+/// There can optionally be params and modifiers to determine how to align
+/// the enclosed directives.
 fn alignment(input: &str) -> FormatResult<Directive> {
     let (input, _) = tag("~")(input)?;
     let (input, params) = params(input)?;
@@ -182,6 +275,7 @@ fn alignment(input: &str) -> FormatResult<Directive> {
     }
 }
 
+/// Iteration as a series of directives enclosed by `~{..~}`.
 fn iteration(input: &str) -> FormatResult<Directive> {
     let (mut input, _) = tag("~{")(input)?;
     let mut result = Vec::new();
@@ -201,6 +295,7 @@ fn iteration(input: &str) -> FormatResult<Directive> {
     }
 }
 
+/// Parse the directive - a supported character preceeded by a `~`.
 fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
     move |input| {
         map_res(
@@ -493,6 +588,43 @@ mod tests {
                 },
                 Directive::Newline,
             ],
+            parsed
+        );
+    }
+
+    #[test]
+    fn parse_conditional() {
+        let format_string = "~[zork~;zoggle~;zoog~]";
+        let token = LitStr::new("zork", proc_macro2::Span::call_site());
+        let parsed = parse_format_string(token, format_string).unwrap();
+        assert_eq!(
+            vec![Directive::Conditional {
+                boolean: false,
+                default: None,
+                choices: vec![
+                    vec![Directive::Literal("zork".to_string())],
+                    vec![Directive::Literal("zoggle".to_string())],
+                    vec![Directive::Literal("zoog".to_string())],
+                ]
+            }],
+            parsed
+        );
+    }
+
+    #[test]
+    fn parse_conditional_with_default() {
+        let format_string = "~[zork~;zoggle~:;zoog~]";
+        let token = LitStr::new("zork", proc_macro2::Span::call_site());
+        let parsed = parse_format_string(token, format_string).unwrap();
+        assert_eq!(
+            vec![Directive::Conditional {
+                boolean: false,
+                choices: vec![
+                    vec![Directive::Literal("zork".to_string())],
+                    vec![Directive::Literal("zoggle".to_string())],
+                ],
+                default: Some(vec![Directive::Literal("zoog".to_string())]),
+            }],
             parsed
         );
     }

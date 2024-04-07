@@ -176,6 +176,96 @@ fn write_expressions<'a, T>(
                 }
                 .to_tokens(tokens);
             }
+            Directive::Conditional {
+                boolean: true,
+                consumes,
+                choices,
+                default: _,
+            } => {
+                let expression = if *consumes {
+                    expressions.next().expect("enough parameters")
+                } else {
+                    expressions.clone().next().expect("enough parameters")
+                };
+
+                let then = {
+                    let mut block = proc_macro2::TokenStream::new();
+                    // We have already validated to ensure there are exactly two choices.
+                    write_expressions(
+                        &mut expressions.clone(),
+                        &choices[0],
+                        &mut block,
+                        writer.clone(),
+                    );
+                    block
+                };
+
+                let r#else = {
+                    let mut block = proc_macro2::TokenStream::new();
+                    // We have already validated to ensure there are exactly two choices.
+                    write_expressions(
+                        &mut expressions.clone(),
+                        &choices[1],
+                        &mut block,
+                        writer.clone(),
+                    );
+                    block
+                };
+
+                quote! {
+                    if #expression {
+                        #then
+                    } else {
+                        #r#else
+                    }
+                }
+                .to_tokens(tokens);
+            }
+            Directive::Conditional {
+                boolean: false,
+                consumes,
+                choices,
+                default,
+            } => {
+                let expression = if *consumes {
+                    expressions.next().expect("enough parameters")
+                } else {
+                    expressions.clone().next().expect("enough parameters")
+                };
+
+                let mut match_tokens = quote! {};
+
+                for (idx, e) in choices.iter().enumerate() {
+                    let mut block = proc_macro2::TokenStream::new();
+                    write_expressions(&mut expressions.clone(), e, &mut block, writer.clone());
+                    match_tokens = quote! {
+                        #match_tokens
+                        #idx => { #block }
+                    };
+                }
+
+                if let Some(default) = default {
+                    let mut block = proc_macro2::TokenStream::new();
+                    write_expressions(
+                        &mut expressions.clone(),
+                        default,
+                        &mut block,
+                        writer.clone(),
+                    );
+
+                    match_tokens = quote! {
+                        #match_tokens
+                        _ => { #block }
+                    }
+                }
+
+                quote! {
+                    match #expression {
+                        #match_tokens
+                    }
+                }
+                .to_tokens(tokens);
+            }
             Directive::Break => {
                 quote! {
                     if __formatcl_iteration.peek().is_none() {
