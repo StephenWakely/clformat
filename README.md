@@ -24,7 +24,6 @@ At attempt to recreate the Common Lisp [Format function][hyperspec] in a Rust ma
 | `~[...~]` | Conditional expression with multiple clauses for case selection.                                     | No            |
 | `~{...~}` | Iterates over a list, applying formatting directives to each element.                                | Yes           |
 | `~^`      | Exits the closest enclosing iteration or conditional expression if no more arguments are available.  | Yes           |
-| `~|`      | Produces vertical tabulation (page break in some contexts).                                          | No            |
 | `~*`      | Consumes an argument without printing it. Useful for skipping arguments.                             | Yes           |
 | `~I`      | Indents to a specified column, potentially creating new lines if required.                           | No            |
 | `~_`      | Conditional newline: inserts a newline character if not at the beginning of a line.                  | No            |
