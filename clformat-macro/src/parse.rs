@@ -92,6 +92,15 @@ impl Directive {
             )));
         }
 
+        if consumes && (choices.len() != 1 || default.is_some()) {
+            return Err(nom::Err::Error(FormatError::from_external_error(
+                input,
+                nom::error::ErrorKind::Tag,
+                "consume conditional must specify exactly one section",
+            )));
+
+        }
+
         Ok(Self::Conditional {
             boolean,
             consumes,
@@ -600,6 +609,7 @@ mod tests {
         assert_eq!(
             vec![Directive::Conditional {
                 boolean: false,
+                consumes: false,
                 default: None,
                 choices: vec![
                     vec![Directive::Literal("zork".to_string())],
@@ -619,6 +629,7 @@ mod tests {
         assert_eq!(
             vec![Directive::Conditional {
                 boolean: false,
+                consumes: false,
                 choices: vec![
                     vec![Directive::Literal("zork".to_string())],
                     vec![Directive::Literal("zoggle".to_string())],

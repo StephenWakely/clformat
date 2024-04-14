@@ -178,15 +178,11 @@ fn write_expressions<'a, T>(
             }
             Directive::Conditional {
                 boolean: true,
-                consumes,
+                consumes: _,
                 choices,
                 default: _,
             } => {
-                let expression = if *consumes {
-                    expressions.next().expect("enough parameters")
-                } else {
-                    expressions.clone().next().expect("enough parameters")
-                };
+                let expression = expressions.next().expect("enough parameters");
 
                 let then = {
                     let mut block = proc_macro2::TokenStream::new();
@@ -227,44 +223,61 @@ fn write_expressions<'a, T>(
                 choices,
                 default,
             } => {
-                let expression = if *consumes {
-                    expressions.next().expect("enough parameters")
-                } else {
-                    expressions.clone().next().expect("enough parameters")
-                };
+                let expression = expressions.next().expect("enough parameters");
 
-                let mut match_tokens = quote! {};
-
-                for (idx, e) in choices.iter().enumerate() {
+                if *consumes {
+                    // We should have validated there is only one choice when `consumes` is true.
+                    let choice = &choices[0];
                     let mut block = proc_macro2::TokenStream::new();
-                    write_expressions(&mut expressions.clone(), e, &mut block, writer.clone());
-                    match_tokens = quote! {
-                        #match_tokens
-                        #idx => { #block }
+                    let expr = syn::parse_str::<Expr>("__formatcl_inner")
+                        .expect("static string should be valid syntax");
+                    let mut inner = IndexedExpression {
+                        count: 0,
+                        expr: &expr,
                     };
-                }
 
-                if let Some(default) = default {
-                    let mut block = proc_macro2::TokenStream::new();
-                    write_expressions(
-                        &mut expressions.clone(),
-                        default,
-                        &mut block,
-                        writer.clone(),
-                    );
+                    write_expressions(&mut inner, &choice, &mut block, writer.clone());
 
-                    match_tokens = quote! {
-                        #match_tokens
-                        _ => { #block }
+                    quote! {
+                        if let ::core::option::Option::Some(__formatcl_inner) = #expression {
+                            #block
+                        }
                     }
-                }
+                    .to_tokens(tokens);
+                } else {
+                    let mut match_tokens = quote! {};
 
-                quote! {
-                    match #expression {
-                        #match_tokens
+                    for (idx, e) in choices.iter().enumerate() {
+                        let mut block = proc_macro2::TokenStream::new();
+                        write_expressions(&mut expressions.clone(), e, &mut block, writer.clone());
+                        match_tokens = quote! {
+                            #match_tokens
+                            #idx => { #block }
+                        };
                     }
+
+                    if let Some(default) = default {
+                        let mut block = proc_macro2::TokenStream::new();
+                        write_expressions(
+                            &mut expressions.clone(),
+                            default,
+                            &mut block,
+                            writer.clone(),
+                        );
+
+                        match_tokens = quote! {
+                            #match_tokens
+                            _ => { #block }
+                        }
+                    }
+
+                    quote! {
+                        match #expression {
+                            #match_tokens
+                        }
+                    }
+                    .to_tokens(tokens);
                 }
-                .to_tokens(tokens);
             }
             Directive::Break => {
                 quote! {

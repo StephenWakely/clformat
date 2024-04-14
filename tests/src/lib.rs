@@ -118,10 +118,13 @@ mod tests {
 
     #[test]
     fn conditional_consumes() {
-        let x = 2;
-        assert_eq!("norkdork", clformat!(nil, "~[zork~;plork~;nork~:;gork~]~A", x, "dork"));
+        let fish = Some(2);
+        let toes: Option<usize> = None;
 
-        assert_eq!("nork2dork", clformat!(nil, "~@[zork~;plork~;nork~:;gork~]~A~A", x, "dork"));
+        assert_eq!(
+            "2 fish ",
+            clformat!(nil, "~@[~a fish ~]~@[~a toes~]", fish, toes)
+        );
     }
 
     #[test]
