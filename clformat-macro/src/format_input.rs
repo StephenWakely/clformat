@@ -288,6 +288,7 @@ fn write_expressions<'a, T>(
                 .to_tokens(tokens);
             }
             Directive::Decimal {
+                number_type,
                 min_columns,
                 pad_char,
                 comma_char,
@@ -298,13 +299,14 @@ fn write_expressions<'a, T>(
                 let expression = expressions.next().expect("enough parameters");
                 quote! {
                     for __formatcl_c in ::clformat::Decimal::new(
-                                             #min_columns,
-                                             #pad_char,
-                                             #comma_char,
-                                             #comma_interval,
-                                             #print_commas,
-                                             #print_sign,
-                                             #expression) {
+                                    #number_type,
+                                    #min_columns,
+                                    #pad_char,
+                                    #comma_char,
+                                    #comma_interval,
+                                    #print_commas,
+                                    #print_sign,
+                                    #expression) {
                         let r = write!(#writer, "{}", __formatcl_c);
                         if r.is_err() {
                             break '__format_cl__loop r;

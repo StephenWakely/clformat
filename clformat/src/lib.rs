@@ -5,5 +5,5 @@ mod decimal;
 mod num;
 mod ruler;
 
-pub use decimal::Decimal;
+pub use decimal::{Decimal, NumberType};
 pub use ruler::Ruler;

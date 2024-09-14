@@ -1,5 +1,4 @@
-#![allow(warnings)]
-use std::{fmt::Write, io::Write as _, iter::Peekable, ops::Deref};
+use quote::quote;
 
 use nom::{
     branch::alt,
@@ -7,12 +6,12 @@ use nom::{
     character::complete::{anychar, digit1},
     combinator::{cut, eof, map, map_res},
     error::FromExternalError,
-    multi::{many0, many1, many_till, separated_list0},
-    sequence::{delimited, preceded, tuple},
+    multi::{many_till, separated_list0},
+    sequence::{preceded, tuple},
     IResult,
 };
-use proc_macro2::Span;
-use syn::{token::Token, LitStr};
+use quote::ToTokens;
+use syn::LitStr;
 
 use crate::parse_error::FormatError;
 
@@ -30,6 +29,43 @@ impl From<Modifiers> for Alignment {
             (true, false) => Self::Right,
             (false, true) => Self::Left,
             (false, false) => Self::Left,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum NumberType {
+    Decimal,
+    Hexadecimal,
+    Octal,
+    Binary,
+    Radix(u8),
+}
+
+impl TryFrom<char> for NumberType {
+    type Error = &'static str;
+
+    fn try_from(value: char) -> Result<Self, &'static str> {
+        match value {
+            'D' => Ok(Self::Decimal),
+            'X' => Ok(Self::Hexadecimal),
+            'O' => Ok(Self::Octal),
+            'B' => Ok(Self::Binary),
+            _ => Err("invalid number type"),
+        }
+    }
+}
+
+impl ToTokens for NumberType {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            NumberType::Decimal => quote! {  ::clformat::NumberType::Decimal }.to_tokens(tokens),
+            NumberType::Hexadecimal => {
+                quote! {  ::clformat::NumberType::Hexadecimal }.to_tokens(tokens)
+            }
+            NumberType::Octal => quote! {  ::clformat::NumberType::Octal }.to_tokens(tokens),
+            NumberType::Binary => quote! {  ::clformat::NumberType::Binary }.to_tokens(tokens),
+            NumberType::Radix(x) => quote! {  ::clformat:NumberType::Radix(#x) }.to_tokens(tokens),
         }
     }
 }
@@ -56,6 +92,7 @@ pub enum Directive {
         choices: Vec<Vec<Directive>>,
     },
     Decimal {
+        number_type: NumberType,
         min_columns: usize,
         pad_char: char,
         comma_char: char,
@@ -98,7 +135,6 @@ impl Directive {
                 nom::error::ErrorKind::Tag,
                 "consume conditional must specify exactly one section",
             )));
-
         }
 
         Ok(Self::Conditional {
@@ -312,13 +348,15 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
             |(params, modifiers, directive)| match directive.to_ascii_uppercase() {
                 'A' => Ok(Directive::TildeA),
                 'S' => Ok(Directive::TildeS),
-                'D' => {
+                directive @ ('D' | 'O' | 'B' | 'X') => {
+                    let number_type = NumberType::try_from(directive)?;
                     let min_columns = params.get_num(0, 0)? as usize;
                     let pad_char = params.get_char(1, ' ')?;
                     let comma_char = params.get_char(2, ',')?;
                     let comma_interval = params.get_num(3, 3)? as usize;
 
                     Ok(Directive::Decimal {
+                        number_type,
                         min_columns,
                         pad_char,
                         comma_char,
@@ -499,6 +537,7 @@ mod tests {
                 Directive::TildeA,
                 Directive::Literal("! Value: ".to_string()),
                 Directive::Decimal {
+                    number_type: NumberType::Decimal,
                     min_columns: 0,
                     pad_char: ' ',
                     comma_char: ',',

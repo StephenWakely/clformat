@@ -58,6 +58,21 @@ mod tests {
     }
 
     #[test]
+    fn octals() {
+        let num = 4200_isize;
+        assert_eq!("10150", clformat!(nil, "~O", num));
+        assert_eq!("10,150", clformat!(nil, "~:O", num));
+
+        let num = -4200_isize;
+        assert_eq!("-10,150", clformat!(nil, "~:O", num));
+        assert_eq!("____-10,150", clformat!(nil, "~10,'_:O", num));
+
+        let num = 4200_usize;
+        assert_eq!("10150", clformat!(nil, "~O", num));
+        assert_eq!("10,150", clformat!(nil, "~:O", num));
+    }
+
+    #[test]
     fn floats() {
         let num = std::f64::consts::PI;
         assert_eq!("3.14", clformat!(nil, "~,2F", num));

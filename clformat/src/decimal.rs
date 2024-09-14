@@ -1,9 +1,19 @@
 //! Decimal helper struct to format decimals.
 use crate::num::Num;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum NumberType {
+    Decimal,
+    Hexadecimal,
+    Octal,
+    Binary,
+    Radix(u8),
+}
+
+#[derive(Clone, Debug)]
 pub struct Decimal<T> {
     number: T,
+    number_type: NumberType,
     pad_char: char,
     comma_char: char,
     comma_interval: usize,
@@ -29,6 +39,7 @@ fn divisor<T: Num>(number: T) -> (usize, usize) {
 
 impl<T: Num> Decimal<T> {
     pub fn new(
+        number_type: NumberType,
         min_columns: usize,
         pad_char: char,
         comma_char: char,
@@ -58,6 +69,7 @@ impl<T: Num> Decimal<T> {
         };
 
         Self {
+            number_type,
             pad_char,
             comma_char,
             comma_interval,
@@ -126,77 +138,77 @@ mod tests {
 
     #[test]
     fn prints_commas() {
-        let decimal = Decimal::new(0, ' ', ',', 3, true, false, 420);
+        let decimal = Decimal::new(NumberType::Decimal, 0, ' ', ',', 3, true, false, 420);
         let num = decimal.collect::<String>();
         assert_eq!("420".to_string(), num);
 
-        let decimal = Decimal::new(0, ' ', ',', 3, true, false, 4200);
+        let decimal = Decimal::new(NumberType::Decimal, 0, ' ', ',', 3, true, false, 4200);
         let num = decimal.collect::<String>();
         assert_eq!("4,200".to_string(), num);
 
-        let decimal = Decimal::new(0, ' ', ',', 3, true, false, 42000);
+        let decimal = Decimal::new(NumberType::Decimal, 0, ' ', ',', 3, true, false, 42000);
         let num = decimal.collect::<String>();
         assert_eq!("42,000".to_string(), num);
 
-        let decimal = Decimal::new(0, ' ', ',', 3, true, false, 4_200_000);
+        let decimal = Decimal::new(NumberType::Decimal, 0, ' ', ',', 3, true, false, 4_200_000);
         let num = decimal.collect::<String>();
         assert_eq!("4,200,000".to_string(), num);
 
-        let decimal = Decimal::new(0, ' ', ',', 3, true, false, -4_200_000);
+        let decimal = Decimal::new(NumberType::Decimal, 0, ' ', ',', 3, true, false, -4_200_000);
         let num = decimal.collect::<String>();
         assert_eq!("-4,200,000".to_string(), num);
     }
 
     #[test]
     fn prints_alternative_separators() {
-        let decimal = Decimal::new(0, ' ', '_', 3, true, false, 4200);
+        let decimal = Decimal::new(NumberType::Decimal, 0, ' ', '_', 3, true, false, 4200);
         let num = decimal.collect::<String>();
         assert_eq!("4_200".to_string(), num);
 
-        let decimal = Decimal::new(0, ' ', '_', 2, true, false, 42000);
+        let decimal = Decimal::new(NumberType::Decimal, 0, ' ', '_', 2, true, false, 42000);
         let num = decimal.collect::<String>();
         assert_eq!("4_20_00".to_string(), num);
 
-        let decimal = Decimal::new(0, ' ', '_', 4, true, false, 4_200_000);
+        let decimal = Decimal::new(NumberType::Decimal, 0, ' ', '_', 4, true, false, 4_200_000);
         let num = decimal.collect::<String>();
         assert_eq!("420_0000".to_string(), num);
     }
 
     #[test]
     fn pads() {
-        let decimal = Decimal::new(2, ' ', ',', 3, true, false, 420);
+        let decimal = Decimal::new(NumberType::Decimal, 2, ' ', ',', 3, true, false, 420);
         let num = decimal.collect::<String>();
         assert_eq!("420".to_string(), num);
 
-        let decimal = Decimal::new(5, ' ', ',', 3, true, false, 420);
+        let decimal = Decimal::new(NumberType::Decimal, 5, ' ', ',', 3, true, false, 420);
         let num = decimal.collect::<String>();
         assert_eq!("  420".to_string(), num);
 
-        let decimal = Decimal::new(5, ' ', ',', 3, true, false, -420);
+        let decimal = Decimal::new(NumberType::Decimal, 5, ' ', ',', 3, true, false, -420);
         let num = decimal.collect::<String>();
         assert_eq!(" -420".to_string(), num);
 
-        let decimal = Decimal::new(8, '-', ',', 3, true, false, 420);
+        let decimal = Decimal::new(NumberType::Decimal, 8, '-', ',', 3, true, false, 420);
         let num = decimal.collect::<String>();
         assert_eq!("-----420".to_string(), num);
 
-        let decimal = Decimal::new(8, '-', ',', 3, true, false, 4200);
+        let decimal = Decimal::new(NumberType::Decimal, 8, '-', ',', 3, true, false, 4200);
         let num = decimal.collect::<String>();
         assert_eq!("---4,200".to_string(), num);
     }
 
     #[test]
     fn sign() {
-        let decimal = Decimal::new(2, ' ', ',', 3, true, true, 420);
+        let decimal = Decimal::new(NumberType::Decimal, 2, ' ', ',', 3, true, true, 420);
         let num = decimal.collect::<String>();
         assert_eq!("+420".to_string(), num);
 
         // Print the negative sign even if print sign is false
-        let decimal = Decimal::new(2, ' ', ',', 3, true, false, -420);
+        let decimal = Decimal::new(NumberType::Decimal, 2, ' ', ',', 3, true, false, -420);
         let num = decimal.collect::<String>();
         assert_eq!("-420".to_string(), num);
 
-        let decimal = Decimal::new(2, ' ', ',', 3, true, true, -420);
+        let decimal = Decimal::new(NumberType::Decimal, 2, ' ', ',', 3, true, true, -420);
         let num = decimal.collect::<String>();
         assert_eq!("-420".to_string(), num);
     }
