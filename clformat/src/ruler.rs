@@ -16,6 +16,16 @@ impl Ruler {
     pub fn length(&self) -> usize {
         self.length
     }
+
+    /// `Ruler` is only used to measure the length of a piece of output
+    /// before it is written for real, so it has no meaningful concept of
+    /// "current column". Directives like `~T` and `~&` that ask for the
+    /// column during this measurement pass are told they're at the start of
+    /// a line, which keeps their measured length consistent with the
+    /// column they'll actually be written at.
+    pub fn column(&self) -> usize {
+        0
+    }
 }
 
 #[cfg(test)]

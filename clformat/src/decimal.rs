@@ -1,4 +1,5 @@
-//! Decimal helper struct to format decimals.
+//! Decimal helper struct to format decimals (and, more generally, any radix
+//! between 2 and 36 - used to implement `~D`, `~X`, `~O`, `~B` and `~R`).
 use crate::num::Num;
 
 #[derive(Clone, Debug, Default)]
@@ -14,13 +15,14 @@ pub struct Decimal<T> {
     print_sign: bool,
     printed_sign: bool,
     pad: usize,
+    radix: usize,
 }
 
-fn divisor<T: Num>(number: T) -> (usize, usize) {
-    let mut divisor = 1;
+fn divisor<T: Num>(number: T, radix: usize) -> (usize, usize) {
+    let mut divisor: isize = 1;
     let mut count = 1;
-    while number.divide_by(divisor).abs() >= 10 {
-        divisor *= 10;
+    while number.divide_by(divisor).abs() >= radix as isize {
+        divisor *= radix as isize;
         count += 1;
     }
 
@@ -37,7 +39,33 @@ impl<T: Num> Decimal<T> {
         print_sign: bool,
         number: T,
     ) -> Self {
-        let (divisor, digits) = divisor(number);
+        Self::new_radix(
+            10,
+            min_columns,
+            pad_char,
+            comma_char,
+            comma_interval,
+            print_commas,
+            print_sign,
+            number,
+        )
+    }
+
+    /// Like [`Decimal::new`] but allows the radix (base) to be specified.
+    /// Used to implement `~X` (16), `~O` (8), `~B` (2) and `~R` with an
+    /// explicit radix parameter.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_radix(
+        radix: usize,
+        min_columns: usize,
+        pad_char: char,
+        comma_char: char,
+        comma_interval: usize,
+        print_commas: bool,
+        print_sign: bool,
+        number: T,
+    ) -> Self {
+        let (divisor, digits) = divisor(number, radix);
 
         // Take the sign and any commas into consideration when calculating -
         // the number of columns for padding.
@@ -70,6 +98,7 @@ impl<T: Num> Decimal<T> {
             divisor,
             digits,
             pad,
+            radix,
         }
     }
 }
@@ -108,11 +137,20 @@ impl<T: Num> core::iter::Iterator for Decimal<T> {
         }
 
         self.printed_comma = false;
-        let digit = self.number.divide_by(self.divisor as isize) % 10;
-        self.divisor /= 10;
+        let digit = self.number.divide_by(self.divisor as isize) % self.radix as isize;
+        self.divisor /= self.radix;
         self.digits -= 1;
 
-        Some(core::char::from_digit(digit.unsigned_abs() as u32, 10).unwrap())
+        let digit =
+            core::char::from_digit(digit.unsigned_abs() as u32, self.radix as u32).unwrap_or('?');
+
+        // Use uppercase letters for digits above 9 (e.g. hexadecimal), to
+        // match the convention used by Common Lisp implementations.
+        Some(if self.radix > 10 {
+            digit.to_ascii_uppercase()
+        } else {
+            digit
+        })
     }
 }
 
@@ -160,6 +198,24 @@ mod tests {
         let decimal = Decimal::new(0, ' ', '_', 4, true, false, 4_200_000);
         let num = decimal.collect::<String>();
         assert_eq!("420_0000".to_string(), num);
+    }
+
+    #[test]
+    fn prints_other_radixes() {
+        let decimal = Decimal::new_radix(16, 0, ' ', ',', 3, false, false, 255);
+        assert_eq!("FF".to_string(), decimal.collect::<String>());
+
+        let decimal = Decimal::new_radix(8, 0, ' ', ',', 3, false, false, 8);
+        assert_eq!("10".to_string(), decimal.collect::<String>());
+
+        let decimal = Decimal::new_radix(2, 0, ' ', ',', 3, false, false, 10);
+        assert_eq!("1010".to_string(), decimal.collect::<String>());
+
+        let decimal = Decimal::new_radix(16, 4, '0', ',', 3, false, false, 255);
+        assert_eq!("00FF".to_string(), decimal.collect::<String>());
+
+        let decimal = Decimal::new_radix(16, 0, ' ', ',', 3, false, false, -255);
+        assert_eq!("-FF".to_string(), decimal.collect::<String>());
     }
 
     #[test]

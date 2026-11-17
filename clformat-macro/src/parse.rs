@@ -56,6 +56,7 @@ pub enum Directive {
         choices: Vec<Vec<Directive>>,
     },
     Decimal {
+        radix: u32,
         min_columns: usize,
         pad_char: char,
         comma_char: char,
@@ -68,12 +69,59 @@ pub enum Directive {
         num_decimal_places: usize,
         pad_char: char,
     },
+    Exponential {
+        width: usize,
+        digits: Option<usize>,
+        pad_char: char,
+        exponent_char: char,
+        print_sign: bool,
+    },
+    General {
+        width: usize,
+        digits: Option<usize>,
+        pad_char: char,
+        exponent_char: char,
+        print_sign: bool,
+    },
+    EnglishNumber(EnglishMode),
+    Char {
+        named: bool,
+        lisp_syntax: bool,
+    },
+    Plural {
+        y_form: bool,
+        use_previous: bool,
+    },
+    /// `~&` (and, approximately, `~_`): moves to the start of a new line
+    /// unless already there.
+    FreshLine,
+    Tab {
+        colnum: usize,
+        colinc: usize,
+        relative: bool,
+    },
     Iteration(Vec<Directive>),
     Literal(String),
     Newline,
     Skip,
+    Tilde,
     TildeA,
     TildeS,
+}
+
+/// The behaviour of `~R` when no explicit radix parameter is given (and of
+/// `~M`, which is always one of the Roman-numeral modes).
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum EnglishMode {
+    /// `~R` - e.g. "forty-two".
+    Cardinal,
+    /// `~:R` - e.g. "forty-second".
+    Ordinal,
+    /// `~@R` - e.g. "XLII".
+    Roman,
+    /// `~:@R` - old-style Roman numerals that never use subtractive
+    /// notation, e.g. "VIIII" rather than "IX".
+    OldRoman,
 }
 
 impl Directive {
@@ -98,7 +146,6 @@ impl Directive {
                 nom::error::ErrorKind::Tag,
                 "consume conditional must specify exactly one section",
             )));
-
         }
 
         Ok(Self::Conditional {
@@ -312,21 +359,54 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
             |(params, modifiers, directive)| match directive.to_ascii_uppercase() {
                 'A' => Ok(Directive::TildeA),
                 'S' => Ok(Directive::TildeS),
-                'D' => {
-                    let min_columns = params.get_num(0, 0)? as usize;
-                    let pad_char = params.get_char(1, ' ')?;
-                    let comma_char = params.get_char(2, ',')?;
-                    let comma_interval = params.get_num(3, 3)? as usize;
+                'W' => Ok(Directive::TildeS),
+                'D' => decimal_directive(&params, &modifiers, 10),
+                'X' => decimal_directive(&params, &modifiers, 16),
+                'O' => decimal_directive(&params, &modifiers, 8),
+                'B' => decimal_directive(&params, &modifiers, 2),
+                'R' => match params.get_opt_num(0)? {
+                    Some(radix) => {
+                        if !(2..=36).contains(&radix) {
+                            return Err(format!("radix must be between 2 and 36, got {radix}"));
+                        }
 
-                    Ok(Directive::Decimal {
-                        min_columns,
-                        pad_char,
-                        comma_char,
-                        comma_interval,
-                        print_commas: modifiers.colon,
-                        print_sign: modifiers.at,
-                    })
-                }
+                        let min_columns = params.get_num(1, 0)? as usize;
+                        let pad_char = params.get_char(2, ' ')?;
+                        let comma_char = params.get_char(3, ',')?;
+                        let comma_interval = params.get_num(4, 3)? as usize;
+
+                        Ok(Directive::Decimal {
+                            radix: radix as u32,
+                            min_columns,
+                            pad_char,
+                            comma_char,
+                            comma_interval,
+                            print_commas: modifiers.colon,
+                            print_sign: modifiers.at,
+                        })
+                    }
+                    None => Ok(Directive::EnglishNumber(
+                        match (modifiers.colon, modifiers.at) {
+                            (false, false) => EnglishMode::Cardinal,
+                            (true, false) => EnglishMode::Ordinal,
+                            (false, true) => EnglishMode::Roman,
+                            (true, true) => EnglishMode::OldRoman,
+                        },
+                    )),
+                },
+                'M' => Ok(Directive::EnglishNumber(if modifiers.colon {
+                    EnglishMode::OldRoman
+                } else {
+                    EnglishMode::Roman
+                })),
+                'C' => Ok(Directive::Char {
+                    named: modifiers.colon,
+                    lisp_syntax: modifiers.at,
+                }),
+                'P' => Ok(Directive::Plural {
+                    y_form: modifiers.at,
+                    use_previous: modifiers.colon,
+                }),
                 'F' => {
                     let width = params.get_num(0, 0)? as usize;
                     let num_decimal_places = params.get_num(1, 0)? as usize;
@@ -341,7 +421,53 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
                         pad_char,
                     })
                 }
-                '%' => Ok(Directive::Newline),
+                'E' => {
+                    let width = params.get_num(0, 0)? as usize;
+                    let digits = params.get_opt_num(1)?.map(|n| n as usize);
+                    params.assert_missing(2, "exponent digits parameter not supported")?;
+                    params.assert_missing(3, "scale factor parameter not supported")?;
+                    params.assert_missing(4, "overflow char parameter not supported")?;
+                    let pad_char = params.get_char(5, ' ')?;
+                    let exponent_char = params.get_char(6, 'e')?;
+
+                    Ok(Directive::Exponential {
+                        width,
+                        digits,
+                        pad_char,
+                        exponent_char,
+                        print_sign: modifiers.at,
+                    })
+                }
+                'G' => {
+                    let width = params.get_num(0, 0)? as usize;
+                    let digits = params.get_opt_num(1)?.map(|n| n as usize);
+                    params.assert_missing(2, "exponent digits parameter not supported")?;
+                    params.assert_missing(3, "scale factor parameter not supported")?;
+                    params.assert_missing(4, "overflow char parameter not supported")?;
+                    let pad_char = params.get_char(5, ' ')?;
+                    let exponent_char = params.get_char(6, 'e')?;
+
+                    Ok(Directive::General {
+                        width,
+                        digits,
+                        pad_char,
+                        exponent_char,
+                        print_sign: modifiers.at,
+                    })
+                }
+                'T' => {
+                    let colnum = params.get_num(0, 1)? as usize;
+                    let colinc = params.get_num(1, 1)? as usize;
+
+                    Ok(Directive::Tab {
+                        colnum,
+                        colinc,
+                        relative: modifiers.at,
+                    })
+                }
+                '%' | 'N' => Ok(Directive::Newline),
+                '&' | '_' => Ok(Directive::FreshLine),
+                '~' => Ok(Directive::Tilde),
                 '*' => Ok(Directive::Skip),
                 '^' => {
                     if state != State::Loop {
@@ -354,6 +480,30 @@ fn directive(state: State) -> impl Fn(&str) -> FormatResult<Directive> {
             },
         )(input)
     }
+}
+
+/// Shared parsing logic for `~D`, `~X`, `~O` and `~B`, which all take the
+/// same parameters (minimum column count, pad character, comma character
+/// and comma interval) and only differ in their (fixed) radix.
+fn decimal_directive(
+    params: &Params,
+    modifiers: &Modifiers,
+    radix: u32,
+) -> Result<Directive, String> {
+    let min_columns = params.get_num(0, 0)? as usize;
+    let pad_char = params.get_char(1, ' ')?;
+    let comma_char = params.get_char(2, ',')?;
+    let comma_interval = params.get_num(3, 3)? as usize;
+
+    Ok(Directive::Decimal {
+        radix,
+        min_columns,
+        pad_char,
+        comma_char,
+        comma_interval,
+        print_commas: modifiers.colon,
+        print_sign: modifiers.at,
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -396,6 +546,18 @@ impl Params {
             Some(Param::Char(c)) => Ok(*c),
             Some(Param::Missing) => Ok(def),
             None => Ok(def),
+        }
+    }
+
+    /// Like [`Params::get_num`], but returns `None` (rather than a default
+    /// value) when the parameter was not supplied at all. Used by
+    /// directives such as `~R` and `~E` where the presence or absence of a
+    /// parameter changes the directive's behaviour, not just its default.
+    pub fn get_opt_num(&self, idx: usize) -> Result<Option<isize>, String> {
+        match self.parsed.get(idx) {
+            Some(Param::Char(c)) => Err(format!("expected number, found char {c}")),
+            Some(Param::Num(i)) => Ok(Some(*i)),
+            Some(Param::Missing) | None => Ok(None),
         }
     }
 }
@@ -499,6 +661,7 @@ mod tests {
                 Directive::TildeA,
                 Directive::Literal("! Value: ".to_string()),
                 Directive::Decimal {
+                    radix: 10,
                     min_columns: 0,
                     pad_char: ' ',
                     comma_char: ',',
