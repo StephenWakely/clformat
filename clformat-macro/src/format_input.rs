@@ -9,6 +9,7 @@ use syn::{
 };
 
 use crate::parse::Alignment;
+use crate::parse::EnglishMode;
 use crate::parse::{parse_format_string, Directive};
 
 enum Output {
@@ -68,22 +69,28 @@ impl ToTokens for FormatInput {
             var_name.clone(),
         );
 
+        // `#var_name` is always wrapped in a `ColumnTracker` so that
+        // directives such as `~T` (tabulate) and `~&` (fresh-line) can know
+        // the current output column regardless of the output destination.
         let uses = match self.output {
             Output::String => {
                 quote! {
                     use ::std::fmt::Write;
-                    let mut #var_name = String::new();
+                    let mut #var_name = ::clformat::ColumnTracker::new(String::new());
                 }
             }
             Output::Stdout => {
                 quote! {
-                    use ::std::io::Write;
-                    let mut #var_name = ::std::io::stdout();
+                    use ::std::fmt::Write;
+                    let mut #var_name = ::clformat::ColumnTracker::new(
+                        ::clformat::IoWriteAdapter(::std::io::stdout()),
+                    );
                 }
             }
             Output::Writer(ref expr) => {
                 quote! {
-                    let mut #var_name = &mut #expr;
+                    use ::std::fmt::Write;
+                    let mut #var_name = ::clformat::ColumnTracker::new(&mut #expr);
                 }
             }
         };
@@ -99,7 +106,7 @@ impl ToTokens for FormatInput {
                 panic!("oh no");
             }
 
-            #var_name
+            #var_name.into_inner()
         }
         .to_tokens(tokens);
     }
@@ -113,10 +120,16 @@ fn write_expressions<'a, T>(
 ) where
     T: Iterator<Item = &'a Expr> + Clone,
 {
+    // The most recently consumed argument expression, tracked so that `~:P`
+    // (and `~:@P`) can refer back to it without consuming (or
+    // re-evaluating) a new argument.
+    let mut last_expr: Option<&'a Expr> = None;
+
     for directive in directives {
         match directive {
             Directive::TildeA => {
                 let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
                 quote! {
                      let r = write!(#writer, "{}", #expression);
                      if r.is_err() {
@@ -127,6 +140,7 @@ fn write_expressions<'a, T>(
             }
             Directive::TildeS => {
                 let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
                 quote! {
                     let r = write!(#writer, "{:?}", #expression);
                     if r.is_err() {
@@ -151,6 +165,7 @@ fn write_expressions<'a, T>(
             .to_tokens(tokens),
             Directive::Skip => {
                 let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
                 // Note we have to output the expression since loop expressions involve side effects.
                 quote! {  let _ = #expression; }.to_tokens(tokens)
             }
@@ -288,6 +303,7 @@ fn write_expressions<'a, T>(
                 .to_tokens(tokens);
             }
             Directive::Decimal {
+                radix,
                 min_columns,
                 pad_char,
                 comma_char,
@@ -296,8 +312,10 @@ fn write_expressions<'a, T>(
                 print_sign,
             } => {
                 let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
                 quote! {
-                    for __formatcl_c in ::clformat::Decimal::new(
+                    for __formatcl_c in ::clformat::Decimal::new_radix(
+                                             #radix as usize,
                                              #min_columns,
                                              #pad_char,
                                              #comma_char,
@@ -320,6 +338,7 @@ fn write_expressions<'a, T>(
                 pad_char,
             } => {
                 let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
                 let format = format!(
                     "{{:{pad_char}>{width}.{num_decimal_places}}}",
                     width = if *width == 0 {
@@ -335,6 +354,234 @@ fn write_expressions<'a, T>(
                 );
                 quote! {
                     let r = write!(#writer, #format, #expression);
+                    if r.is_err() {
+                        break '__format_cl__loop r;
+                    }
+                }
+                .to_tokens(tokens)
+            }
+            Directive::Exponential {
+                width,
+                digits,
+                pad_char,
+                exponent_char,
+                print_sign,
+            } => {
+                let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
+                let digits_tokens = match digits {
+                    Some(d) => quote! { ::core::option::Option::Some(#d) },
+                    None => quote! { ::core::option::Option::None },
+                };
+                let format = format!(
+                    "{{:{pad_char}>{width}}}",
+                    width = if *width == 0 {
+                        String::new()
+                    } else {
+                        width.to_string()
+                    }
+                );
+
+                quote! {
+                    let __formatcl_value: f64 = (#expression) as f64;
+                    let __formatcl_digits: ::core::option::Option<usize> = #digits_tokens;
+                    let __formatcl_s = ::clformat::format_exponential(
+                        __formatcl_value,
+                        __formatcl_digits.unwrap_or(6),
+                        #exponent_char,
+                    );
+                    let __formatcl_s = if #print_sign && __formatcl_value >= 0.0 {
+                        ::std::format!("+{}", __formatcl_s)
+                    } else {
+                        __formatcl_s
+                    };
+                    let r = write!(#writer, #format, __formatcl_s);
+                    if r.is_err() {
+                        break '__format_cl__loop r;
+                    }
+                }
+                .to_tokens(tokens)
+            }
+            Directive::General {
+                width,
+                digits,
+                pad_char,
+                exponent_char,
+                print_sign,
+            } => {
+                let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
+                let digits_tokens = match digits {
+                    Some(d) => quote! { ::core::option::Option::Some(#d) },
+                    None => quote! { ::core::option::Option::None },
+                };
+                let format = format!(
+                    "{{:{pad_char}>{width}}}",
+                    width = if *width == 0 {
+                        String::new()
+                    } else {
+                        width.to_string()
+                    }
+                );
+
+                quote! {
+                    let __formatcl_value: f64 = (#expression) as f64;
+                    let __formatcl_digits: ::core::option::Option<usize> = #digits_tokens;
+                    let (__formatcl_exp, __formatcl_places) =
+                        ::clformat::general_params(__formatcl_value, __formatcl_digits);
+                    let __formatcl_s = if __formatcl_exp {
+                        ::clformat::format_exponential(__formatcl_value, __formatcl_places, #exponent_char)
+                    } else {
+                        ::std::format!("{:.*}", __formatcl_places, __formatcl_value)
+                    };
+                    let __formatcl_s = if #print_sign && __formatcl_value >= 0.0 {
+                        ::std::format!("+{}", __formatcl_s)
+                    } else {
+                        __formatcl_s
+                    };
+                    let r = write!(#writer, #format, __formatcl_s);
+                    if r.is_err() {
+                        break '__format_cl__loop r;
+                    }
+                }
+                .to_tokens(tokens)
+            }
+            Directive::EnglishNumber(mode) => {
+                let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
+                let call = match mode {
+                    EnglishMode::Cardinal => {
+                        quote! { ::clformat::to_cardinal((#expression) as i128) }
+                    }
+                    EnglishMode::Ordinal => {
+                        quote! { ::clformat::to_ordinal((#expression) as i128) }
+                    }
+                    EnglishMode::Roman => {
+                        quote! { ::clformat::to_roman((#expression) as i128, false) }
+                    }
+                    EnglishMode::OldRoman => {
+                        quote! { ::clformat::to_roman((#expression) as i128, true) }
+                    }
+                };
+                quote! {
+                    let r = write!(#writer, "{}", #call);
+                    if r.is_err() {
+                        break '__format_cl__loop r;
+                    }
+                }
+                .to_tokens(tokens)
+            }
+            Directive::Char { named, lisp_syntax } => {
+                let expression = expressions.next().expect("enough parameters");
+                last_expr = Some(expression);
+
+                let body = match (named, lisp_syntax) {
+                    (false, false) => quote! {
+                        write!(#writer, "{}", #expression)
+                    },
+                    (true, false) => quote! {
+                        match ::clformat::char_name(#expression) {
+                            ::core::option::Option::Some(name) => write!(#writer, "{}", name),
+                            ::core::option::Option::None => write!(#writer, "{}", #expression),
+                        }
+                    },
+                    (_, true) => quote! {
+                        match ::clformat::char_name(#expression) {
+                            ::core::option::Option::Some(name) => write!(#writer, "#\\{}", name),
+                            ::core::option::Option::None => write!(#writer, "#\\{}", #expression),
+                        }
+                    },
+                };
+
+                quote! {
+                    let r = #body;
+                    if r.is_err() {
+                        break '__format_cl__loop r;
+                    }
+                }
+                .to_tokens(tokens)
+            }
+            Directive::Plural {
+                y_form,
+                use_previous,
+            } => {
+                let expression = if *use_previous {
+                    last_expr
+                        .expect("~:P must be preceded by a directive that consumes an argument")
+                } else {
+                    let expression = expressions.next().expect("enough parameters");
+                    last_expr = Some(expression);
+                    expression
+                };
+
+                let text = if *y_form {
+                    quote! { if (#expression) == 1 { "y" } else { "ies" } }
+                } else {
+                    quote! { if (#expression) == 1 { "" } else { "s" } }
+                };
+
+                quote! {
+                    let r = write!(#writer, "{}", #text);
+                    if r.is_err() {
+                        break '__format_cl__loop r;
+                    }
+                }
+                .to_tokens(tokens)
+            }
+            Directive::Tilde => quote! {
+               let r = write!(#writer, "~");
+               if r.is_err() {
+                   break '__format_cl__loop r;
+               }
+            }
+            .to_tokens(tokens),
+            Directive::FreshLine => quote! {
+               let r = if #writer.column() != 0 {
+                   write!(#writer, "\n")
+               } else {
+                   Ok(())
+               };
+               if r.is_err() {
+                   break '__format_cl__loop r;
+               }
+            }
+            .to_tokens(tokens),
+            Directive::Tab {
+                colnum,
+                colinc,
+                relative,
+            } => {
+                let target = if *relative {
+                    quote! {
+                        {
+                            let __formatcl_target = #writer.column() + #colnum;
+                            if #colinc > 0 {
+                                __formatcl_target + ((#colinc - (__formatcl_target % #colinc)) % #colinc)
+                            } else {
+                                __formatcl_target
+                            }
+                        }
+                    }
+                } else {
+                    quote! {
+                        {
+                            let __formatcl_current = #writer.column();
+                            if __formatcl_current <= #colnum {
+                                #colnum
+                            } else if #colinc > 0 {
+                                let __formatcl_diff = __formatcl_current - #colnum;
+                                #colnum + __formatcl_diff.div_ceil(#colinc) * #colinc
+                            } else {
+                                __formatcl_current
+                            }
+                        }
+                    }
+                };
+
+                quote! {
+                    let __formatcl_tab_target = #target;
+                    let __formatcl_tab_pad = __formatcl_tab_target.saturating_sub(#writer.column());
+                    let r = write!(#writer, "{:1$}", "", __formatcl_tab_pad);
                     if r.is_err() {
                         break '__format_cl__loop r;
                     }
